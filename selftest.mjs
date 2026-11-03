@@ -121,18 +121,24 @@ await test('token 不对的连接被拒绝，不会被配对', async () => {
   B.destroy();
 });
 
-// ── 3b：载荷不出现在服务器输出里 ──────────────────────────────────────────
-await test('服务器 stdout 里不出现任何电路载荷字节', async () => {
-  const marker = 'TOP-SECRET-PAYLOAD-MUST-NOT-APPEAR';
+// ── 3b：载荷不出现在服务器输出里（8 字节滑窗，前缀泄露也能发现）──────────────
+await test('服务器 stdout 里不出现任何电路载荷字节（8 字节滑窗）', async () => {
+  // 16 字节，字母/数字组合不会自然出现在事件行里；只要日志吐出任意 ≥8 字节前缀就红
+  const marker = Buffer.from('payload-9f3c1a7e');
   const A = await connect();
   const B = await connect();
   A.write(`GSRL1 ${TOKEN} ${ch('d')}\n`);
   await sleep(80);
   B.write(`GSRL1 ${TOKEN} ${ch('d')}\n`);
   await sleep(120);
-  A.write(Buffer.from(marker));
+  A.write(marker);
   await sleep(400);
-  assert.ok(!out.includes(marker), '服务器把载荷打进了日志 ⇒ 它就不是"只搬字节"了');
+  const hay = Buffer.from(out);
+  let leaked = false;
+  for (let i = 0; i + 8 <= hay.length && !leaked; i++) {
+    leaked = hay.compare(marker, 0, 8, i, i + 8) === 0;
+  }
+  assert.ok(!leaked, '服务器输出了载荷的 ≥8 字节前缀 ⇒ 它就不是"只搬字节"了');
   A.destroy();
   B.destroy();
 });
