@@ -110,6 +110,7 @@ await test('token 不对的连接被拒绝，不会被配对', async () => {
   await assertRejected(A);
   await sleep(150);
   assert.equal(gotB().length, 0, '被拒的一侧不得把任何字节送到对端');
+  assert.ok(out.includes('E_BAD_HELLO'), '拒绝日志必须带稳定错误码 E_BAD_HELLO');
   B.destroy();
 });
 
@@ -155,6 +156,7 @@ await test('等不到对端时自己退出，且槽位可被后来者复用', as
   A.write(`GSRL1 ${TOKEN} ${ch('f')}\n`);
   const closed = new Promise((r) => A.once('close', r));
   await closed; // WAIT_TIMEOUT_MS = 2s
+  assert.ok(out.includes('E_WAIT_TIMEOUT'), '等待超时日志必须带稳定错误码 E_WAIT_TIMEOUT');
   const C = await connect();
   const D = await connect();
   const gotD = collect(D);
@@ -185,6 +187,7 @@ await test('长期无字节的电路被空闲回收', async () => {
 await test('连上不发首行的连接被超时掐掉', async () => {
   const A = await connect();
   await assertRejected(A); // HELLO_TIMEOUT_MS = 1.5s
+  assert.ok(out.includes('E_HELLO_TIMEOUT'), '首行超时日志必须带稳定错误码 E_HELLO_TIMEOUT');
 });
 
 // ── 6：等待期暂存有硬上界（"不缓存"的定量版） ─────────────────────────────
@@ -201,6 +204,10 @@ await test('对端不来时，单侧灌入超过 PENDING_MAX 即被拒，不会�
   const took = Date.now() - t0;
   // 不检查耗时的话，等待超时（2s）也会关掉连接 ⇒ 这条会假通过。
   assert.ok(took < 1500, `关闭来得太晚（${took}ms），像是等待超时干的，不是暂存上限干的`);
+  assert.ok(
+    out.includes('E_PENDING_OVERFLOW'),
+    '暂存超限日志必须带稳定错误码 E_PENDING_OVERFLOW',
+  );
   A.destroy();
 });
 

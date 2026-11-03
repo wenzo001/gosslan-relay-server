@@ -92,6 +92,8 @@ const waiting = new Map();
 /** 已配对电路。 */
 const circuits = new Set();
 const stats = { accepted: 0, paired: 0, rejected: 0, bytes: 0, clients: 0 };
+/** 连接序号：仅用于把日志行对到同一条连接（并发时通道前缀会撞），无协议含义。 */
+let connSeq = 0;
 
 const log = (...a) => LOG_EVENTS && console.log(new Date().toISOString(), ...a);
 
@@ -123,10 +125,13 @@ function clearTimer(which, c) {
   }
 }
 
-/** 首行非法或超限：留一行原因、断开。载荷一个字节都不碰。 */
-function reject(c, why) {
+/** 首行非法或超限：留一行原因、断开。载荷一个字节都不碰。
+ *  `code` 是稳定错误码（对照表见 README「日志错误码」）：监控按码 grep，
+ *  中文说明给人读。错误码只进服务器日志，**不发给客户端** —— 对客户端的
+ *  契约不变，仍然只有关闭时机（见 README 协议规格）。 */
+function reject(c, code, why) {
   stats.rejected++;
-  log(`[reject] ${why}`);
+  log(`[reject] #${c.id} ${code} ${why}`);
   clearTimer('helloTimer', c);
   if (c.ch && waiting.get(c.ch) === c) waiting.delete(c.ch);
   if (!c.sock.destroyed) c.sock.destroy();
@@ -144,7 +149,7 @@ function pair(a, b) {
     x.other = y;
     x.circuit = circuit;
   }
-  log(`[circuit] 配对 ch=${a.ch.slice(0, 8)}… 电路数=${circuits.size}`);
+  log(`[circuit] 配对 #${a.id}+#${b.id} ch=${a.ch.slice(0, 8)}… 电路数=${circuits.size}`);
   for (const [from, to] of [[a, b], [b, a]]) {
     if (from.pending.length) {
       const buf = Buffer.concat(from.pending);
@@ -181,7 +186,7 @@ function closeCircuit(circuit, why) {
   circuit.dead = true;
   circuits.delete(circuit);
   log(
-    `[circuit] 结束 ch=${circuit.a.ch.slice(0, 8)}… ` +
+    `[circuit] 结束 #${circuit.a.id}+#${circuit.b.id} ch=${circuit.a.ch.slice(0, 8)}… ` +
       `上行=${circuit.up}B 下行=${circuit.down}B 原因=${why}`,
   );
   for (const c of [circuit.a, circuit.b]) dropConn(c);
@@ -202,9 +207,10 @@ function dropConn(c) {
 
 const server = net.createServer((sock) => {
   stats.accepted++;
+  const id = ++connSeq;
   if (stats.clients >= MAX_CLIENTS) {
     stats.rejected++;
-    log('[reject] 连接数已达上限');
+    log(`[reject] #${id} E_MAX_CLIENTS 连接数已达上限`);
     sock.destroy();
     return;
   }
@@ -213,6 +219,7 @@ const server = net.createServer((sock) => {
   sock.setKeepAlive(true, 30_000);
 
   const c = {
+    id,
     sock,
     phase: 'hello',
     head: [],
@@ -225,7 +232,7 @@ const server = net.createServer((sock) => {
     waitTimer: null,
     countedDown: false,
     helloTimer: setTimeout(() => {
-      if (c.phase === 'hello') reject(c, '首行超时');
+      if (c.phase === 'hello') reject(c, 'E_HELLO_TIMEOUT', '首行超时');
     }, HELLO_TIMEOUT_MS),
   };
 
@@ -236,7 +243,7 @@ const server = net.createServer((sock) => {
     if (c.phase === 'waiting') {
       c.pending.push(chunk);
       c.pendingLen += chunk.length;
-      if (c.pendingLen > PENDING_MAX) reject(c, '等待期暂存超限');
+      if (c.pendingLen > PENDING_MAX) reject(c, 'E_PENDING_OVERFLOW', '等待期暂存超限');
       return;
     }
     forward(c, c.other, chunk);
@@ -253,7 +260,7 @@ function onHello(c, chunk) {
   if (nl < 0) {
     c.head.push(chunk);
     c.headLen += chunk.length;
-    if (c.headLen > MAX_LINE) reject(c, '首行超长');
+    if (c.headLen > MAX_LINE) reject(c, 'E_LINE_TOO_LONG', '首行超长');
     return;
   }
   c.head.push(chunk.subarray(0, nl));
@@ -262,7 +269,7 @@ function onHello(c, chunk) {
   clearTimer('helloTimer', c);
   // 换行落在后续 chunk 时，上面那条"无换行才检查"的路径没覆盖到，这里补上：
   // 承诺是整行 ≤256 字节，就不能只在其中一半路径上生效。
-  if (headBuf.length > MAX_LINE) return reject(c, '首行超长');
+  if (headBuf.length > MAX_LINE) return reject(c, 'E_LINE_TOO_LONG', '首行超长');
   const head = headBuf.toString('utf8').replace(/\r$/, '');
   // 同一 chunk 里首行之后的字节属于电路载荷，必须留到配对后按序写出。
   const rest = chunk.subarray(nl + 1);
@@ -271,7 +278,7 @@ function onHello(c, chunk) {
     c.pendingLen += rest.length;
     // 首行和第一批载荷挤在同一个包里是常态（客户端拿到"能发了"就乐观开讲），
     // 不在这里查一次的话，PENDING_MAX 就不是硬上界。
-    if (c.pendingLen > PENDING_MAX) return reject(c, '等待期暂存超限');
+    if (c.pendingLen > PENDING_MAX) return reject(c, 'E_PENDING_OVERFLOW', '等待期暂存超限');
   }
   acceptHello(c, head);
 }
@@ -285,7 +292,7 @@ function acceptHello(c, head) {
     /^[0-9a-f]{64}$/.test(ch ?? '') &&
     tokenOk(token ?? '');
   if (!ok) {
-    reject(c, '首行非法（协议版本 / token / 通道哈希格式）');
+    reject(c, 'E_BAD_HELLO', '首行非法（协议版本 / token / 通道哈希格式）');
     return;
   }
   c.ch = ch;
@@ -305,7 +312,7 @@ function acceptHello(c, head) {
   c.waitTimer = setTimeout(() => {
     if (waiting.get(c.ch) === c) {
       waiting.delete(c.ch);
-      log(`[wait] 对端未出现，放弃 ch=${c.ch.slice(0, 8)}…`);
+      log(`[wait] #${c.id} E_WAIT_TIMEOUT 对端未出现，放弃 ch=${c.ch.slice(0, 8)}…`);
       dropConn(c);
     }
   }, WAIT_TIMEOUT_MS);
@@ -320,6 +327,8 @@ setInterval(() => {
   for (const [ch, c] of [...waiting]) {
     if (now - (c.waitedSince ?? now) > WAIT_TIMEOUT_MS) {
       waiting.delete(ch);
+      // 兜底路径：正常由 waitTimer 先触发；走到这里说明定时器没按时跑，留个码好查。
+      log(`[wait] #${c.id} E_WAIT_TIMEOUT 等待槽超时（清扫）ch=${ch.slice(0, 8)}…`);
       dropConn(c);
     }
   }
