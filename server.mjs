@@ -399,7 +399,14 @@ if (HEALTHZ_PORT > 0) {
       res.writeHead(405, { allow: 'GET, HEAD' }).end();
       return;
     }
-    if (req.url !== '/healthz' && req.url !== '/') {
+    // 按 pathname 匹配：/healthz 可带查询串；/ 与其它路径一律 404（未文档化的路径不开口子）。
+    let path = '';
+    try {
+      path = new URL(req.url, 'http://127.0.0.1').pathname;
+    } catch {
+      // 非法 URL 当未知路径处理
+    }
+    if (path !== '/healthz') {
       res.writeHead(404).end();
       return;
     }

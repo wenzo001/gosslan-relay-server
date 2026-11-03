@@ -247,7 +247,7 @@ await test('弱口令（<16 字符）监听非回环地址时以退出码 2 拒�
 });
 
 // ── 8：健康检查端点（可选功能，启用时不得装死） ───────────────────────────
-await test('健康端点 /healthz 返回 200 与运行指标；未知路径 404', async () => {
+await test('健康端点 /healthz 返回 200 与运行指标；HEAD/POST/查询串/未知路径行为确定', async () => {
   const res = await fetch(`http://127.0.0.1:${HZPORT}/healthz`);
   assert.equal(res.status, 200, '/healthz 必须 200');
   const body = await res.json();
@@ -258,6 +258,15 @@ await test('健康端点 /healthz 返回 200 与运行指标；未知路径 404'
     assert.ok(Number.isFinite(body[k]), `指标缺 ${k}`);
   }
   assert.ok(body.totals && Number.isFinite(body.totals.accepted), '累计计数必须在');
+  const withQuery = await fetch(`http://127.0.0.1:${HZPORT}/healthz?x=1`);
+  assert.equal(withQuery.status, 200, '带查询串的 /healthz 也必须 200（按 pathname 匹配）');
+  const head = await fetch(`http://127.0.0.1:${HZPORT}/healthz`, { method: 'HEAD' });
+  assert.equal(head.status, 200, 'HEAD /healthz 必须 200');
+  assert.equal((await head.text()).length, 0, 'HEAD 不应返回正文');
+  const post = await fetch(`http://127.0.0.1:${HZPORT}/healthz`, { method: 'POST' });
+  assert.equal(post.status, 405, '非 GET/HEAD 必须 405');
+  const root = await fetch(`http://127.0.0.1:${HZPORT}/`);
+  assert.equal(root.status, 404, '/ 不再隐式当作健康端点');
   const miss = await fetch(`http://127.0.0.1:${HZPORT}/nope`);
   assert.equal(miss.status, 404, '未知路径必须 404，不能什么都回 200');
 });

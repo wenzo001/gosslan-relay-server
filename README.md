@@ -142,7 +142,9 @@ pm2 describe gosslan-relay | grep -E "status|restarts|memory"
 
 字段与 `[stats]` 行同源（聚合计数，不含任何通道哈希或载荷）。判读：**200 = 进程活着
 且事件循环在转**；连不上或非 200 = 进程死了/卡死/没启用端点。监控探针按 200 配即可，
-`totals.rejected` 持续上涨值得看日志。Docker 镜像与 PM2 配置默认启用（只绑回环，
+`totals.rejected` 持续上涨值得看日志。路径按 `URL.pathname` 匹配：只认 `/healthz`——
+可以带查询串（`/healthz?x=1` 同样 200），`/` 与其它路径一律 404，非 GET/HEAD 返回 405。
+Docker 镜像与 PM2 配置默认启用（只绑回环，
 镜像的 HEALTHCHECK 已接它）；systemd 需要在 env 里加 `HEALTHZ_PORT=59994`
 （要对外暴露先想清楚）。
 
