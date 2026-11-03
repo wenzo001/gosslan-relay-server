@@ -2,7 +2,7 @@
 /**
  * 中转服务器的自测（零依赖，`node selftest.mjs` 直接跑）。
  *
- * 它验的是这台机器的**四条承诺**，不是 Gosslan 协议：
+ * 它验的是这台机器的**十一条承诺**，不是 Gosslan 协议：
  *   1. 同一通道哈希的两条连接被拼成双向字节管道，字节严格保序、不丢不重；
  *   2. 配对之前就已到达的字节不会被吞（首行和首帧挤在同一个 TCP 包里的真实情况）；
  *   3. token 不对 / 通道哈希格式不对 ⇒ 直接拒，且**服务器 stdout 里不出现任何载荷字节**
@@ -15,11 +15,13 @@
  *      E_PENDING_OVERFLOW），监控才有的 grep。
  *   8. 启用了健康端点时，/healthz 必须 200 且带运行指标，未知路径 404。
  *   9. 连接数达 MAX_CLIENTS 时新连接被拒（带错误码），释放槽位后可再接入。
+ *  10. 慢消费者：对端暂停读取时背压生效 —— 灌大流量不吃掉整份载荷，恢复后逐字节一致。
+ *  11. 一端 destroy 后两端都清理，健康端点 clients/circuits 归零（计数不泄漏）。
  *
  * 跑法：TOKEN=… node selftest.mjs   （退出码 0 = 全部通过）
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import net from 'node:net';
 import assert from 'node:assert/strict';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -63,6 +65,15 @@ function collect(sock) {
   const parts = [];
   sock.on('data', (b) => parts.push(b));
   return () => Buffer.concat(parts);
+}
+
+/** 读子进程 RSS（KiB）。ps 在 macOS/Linux 都有；读不到返回 0，由用例显式判失败。 */
+function rssKiB() {
+  try {
+    return Number(execFileSync('ps', ['-o', 'rss=', '-p', String(child.pid)], { encoding: 'utf8' }).trim());
+  } catch {
+    return 0;
+  }
 }
 
 const results = [];
@@ -315,6 +326,85 @@ await test('连接数达上限时新连接被拒；释放槽位后可再接入',
   } finally {
     capped.kill('SIGTERM');
   }
+});
+
+// ── 10：慢消费者（对端暂停读取）时背压生效 ────────────────────────────────
+await test('对端暂停读取时背压生效：不整份吃掉载荷，恢复后字节与顺序一致', async () => {
+  const A = await connect();
+  const B = await connect();
+  const parts = [];
+  let recvLen = 0;
+  B.on('data', (b) => {
+    parts.push(b);
+    recvLen += b.length;
+  });
+  A.write(`GSRL1 ${TOKEN} ${ch('1')}\n`);
+  await sleep(80);
+  B.write(`GSRL1 ${TOKEN} ${ch('1')}\n`);
+  await sleep(150);
+
+  B.pause(); // 模拟慢消费者：客户端不再读，内核+服务器写入侧必须先顶住
+  const SIZE = 32 * 1024 * 1024;
+  const payload = Buffer.alloc(SIZE);
+  for (let i = 0; i < SIZE; i++) payload[i] = i % 251; // 周期 pattern，乱序/丢字节都会露馅
+  const baseRss = rssKiB();
+  let peakRss = baseRss;
+  const sampler = setInterval(() => {
+    peakRss = Math.max(peakRss, rssKiB());
+  }, 100);
+
+  A.write(payload);
+  await sleep(700); // 让服务器把能写的都写进 B 的发送缓冲，然后背压应当压住 A
+  B.resume();
+
+  await new Promise((resolve, reject) => {
+    const deadline = Date.now() + 20_000;
+    const iv = setInterval(() => {
+      if (recvLen >= SIZE) {
+        clearInterval(iv);
+        resolve();
+      } else if (Date.now() > deadline) {
+        clearInterval(iv);
+        reject(new Error(`恢复读取后只收到 ${recvLen}/${SIZE} 字节`));
+      }
+    }, 50);
+  });
+  clearInterval(sampler);
+  const got = Buffer.concat(parts);
+  assert.equal(got.length, SIZE, '字节数必须与写入一致');
+  assert.ok(got.equals(payload), '恢复读取后内容必须逐字节一致且保序');
+  // 32MiB 在途时服务器只该持有有限缓冲；若把整份载荷吃进内存，增量会接近 32MiB
+  assert.ok(peakRss > 0, '读不到子进程 RSS，无法判断内存占用');
+  assert.ok(
+    peakRss - baseRss < 16 * 1024,
+    `服务器 RSS 增量 ${peakRss - baseRss}KiB 过大，背压没有生效（整份载荷被吃进内存）`,
+  );
+  A.destroy();
+  B.destroy();
+});
+
+// ── 11：一端 destroy 后两端清理，健康端点计数归零 ─────────────────────────
+await test('一端 destroy 后两端 close，且 /healthz 的 clients/circuits 归零', async () => {
+  const A = await connect();
+  const B = await connect();
+  A.write(`GSRL1 ${TOKEN} ${ch('2')}\n`);
+  await sleep(80);
+  B.write(`GSRL1 ${TOKEN} ${ch('2')}\n`);
+  await sleep(150);
+  const bClosed = new Promise((r) => B.once('close', r));
+  A.destroy();
+  await bClosed; // 一端断开 ⇒ 服务器必须把另一端一起关掉
+
+  const deadline = Date.now() + 3000;
+  let last = null;
+  while (Date.now() < deadline) {
+    const res = await fetch(`http://127.0.0.1:${HZPORT}/healthz`);
+    last = await res.json();
+    if (last.clients === 0 && last.circuits === 0) break;
+    await sleep(100);
+  }
+  assert.equal(last.circuits, 0, `destroy 后 circuits 必须归零，实际 ${last.circuits}`);
+  assert.equal(last.clients, 0, `destroy 后 clients 必须归零，实际 ${last.clients}`);
 });
 
 child.kill('SIGTERM');
