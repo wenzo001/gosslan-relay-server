@@ -245,6 +245,7 @@ const child = spawn(process.execPath, [new URL('./server.mjs', import.meta.url).
     HELLO_TIMEOUT_MS: '1500',
     WAIT_TIMEOUT_MS: '4000',
     STATS: '0',
+    LOG: '1', // 显式覆盖外部环境：下面用启动行当子进程就绪信号
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });

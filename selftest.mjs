@@ -40,6 +40,7 @@ const child = spawn(process.execPath, [new URL('./server.mjs', import.meta.url).
     IDLE_TIMEOUT_MS: '3000',
     PENDING_MAX: '4096',
     STATS: '0',
+    LOG: '1', // 显式覆盖外部环境：测试用 stdout 当"已就绪"信号，LOG=0 会永久挂起
     HEALTHZ_PORT: String(HZPORT),
   },
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -258,6 +259,7 @@ await test('连接数达上限时新连接被拒；释放槽位后可再接入',
       MAX_CLIENTS: '2',
       HELLO_TIMEOUT_MS: '30000', // 静默占位连接在测试期间不被首行超时干扰
       STATS: '0',
+      LOG: '1', // 同上：启动行是子进程就绪信号
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
