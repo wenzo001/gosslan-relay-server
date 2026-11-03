@@ -1,6 +1,8 @@
-# 最小 CI：跑这台机器的两套回归（零依赖，不需要 npm install）。
+# 最小 CI：跑这台机器的两套回归 + fixture 重生成比对（零依赖，不需要 npm install）。
 # - selftest.mjs：服务器自身行为（配对/回收/上限/闸门，12 条）
 # - protocol_conformance.mjs：协议 fixture 对照（漂移即红，15 条）
+# - fixture 重生成：用 fixtures/generator 重新生成并与已提交的 protocol.fixtures.json
+#   逐字节比对，防止「改了生成器/忘了重生成 fixture」的漂移。
 # 任一红 = 这次改动破坏了既有承诺或线格式，不许合。
 name: CI
 
@@ -10,7 +12,7 @@ on:
 
 jobs:
   test:
-    name: selftest + protocol conformance
+    name: selftest + protocol conformance + fixture
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,3 +23,7 @@ jobs:
         run: node selftest.mjs
       - name: Protocol conformance（fixture 对照 15 条）
         run: node protocol_conformance.mjs
+      - name: Fixture 重新生成并逐字节比对
+        run: |
+          cargo run --locked --quiet --manifest-path fixtures/generator/Cargo.toml > /tmp/protocol.fixtures.json
+          cmp protocol.fixtures.json /tmp/protocol.fixtures.json

@@ -345,7 +345,10 @@ node protocol_conformance.mjs   # 或 npm run conformance
 `server.mjs`（正例必须被保持、负例必须被拒）。主仓侧的对应测试应加载同一份
 fixture 跑 Rust 实现（消费方式与测试骨架见
 [INTEGRATION.md「协议 fixture」](INTEGRATION.md#协议-fixture漂移即红的共享真值)）。
-**任何一侧改了线格式而没同步另一侧，至少有一边的对照测试会红。**
+**任何一侧改了线格式而没同步另一侧，至少有一边的对照测试会红**——前提是改动同时同步到
+`fixtures/generator/` 里被复制的函数。CI 会用 `cargo run --locked` 重新生成并与已提交的
+fixture 做 `cmp`（生成器↔fixture 漂移即红）；主仓只改 Rust、不同步生成器时，本仓仍只能
+看到旧副本。
 
 改协议的正确流程：先改主仓实现 → 在 `fixtures/generator/` 里同步被复制的函数 →
 `cargo run` 重新生成向量 → 两个仓库各自跑对照测试。向量里的私钥/口令全是公开
