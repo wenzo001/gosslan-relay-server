@@ -4,6 +4,22 @@
 `feat` → minor，`fix`（含安全加固）→ patch，`docs`/`test` → patch。
 一 issue 一 commit 一版本。
 
+## [1.2.1] - 2026-11-03
+
+### Added
+
+- 协议共享 fixture 与对照测试（对治 ADR-0020 自述的"漂移了不会有测试提醒"）：
+  - `protocol.fixtures.json`：字节级真值向量（epoch_day / 通道哈希 / 协商签名
+    材料 / GSRW1 Ed25519 签名 / X25519 DH / 双向记录密钥 / 记录层密文 / 首行
+    正例与 8 个负例）。由主仓实现（`relay_seal.rs` / `relay.rs`，commit
+    973b4df3）的同版本 crate 生成；生成器源码在 `fixtures/generator/`，
+    重新生成与已提交向量逐字节一致（确定性已验证）。
+  - `protocol_conformance.mjs`（`npm run conformance`）：用 Node 内置加密独立
+    重算全部向量并比对，再拿 fixture 首行真打 `server.mjs`（15/15 通过）。
+    首次把"签名材料是 serde_json 元组、域前缀按数字数组序列化"这一文档未写的
+    字节形态钉成向量。
+  - 不改任何运行时行为；主仓侧消费方式与 Rust 测试骨架写入 INTEGRATION §10。
+
 ## [1.2.0] - 2026-11-03
 
 ### Added

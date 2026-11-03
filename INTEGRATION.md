@@ -412,3 +412,73 @@ GNU netcat 用 `-N`，但 `-N` 会半关，同样被服务器当成退出）。
 | 一条连接服务多个好友（多路复用） | 那是"控制连接"级别的协议改造，独立一轮，不是这里的小改 |
 | 隐藏流量形状/精确长度/时刻 | 要么 TLS，要么定长分桶填充，都是独立一轮。现在做属于过度设计 |
 | 走 443 / WebSocket 绕过运营商限制 | 会引入依赖与证书管理。若确实有需求，单开一轮讨论，别塞进 `GSRL1` |
+
+---
+
+## 10. 协议 fixture：两边不一致会红的共享真值
+
+**问题**：线格式在两个仓库各有一份文字（本仓 README「协议规格」↔ 主仓
+`relay_seal.rs` 实现 + ADR-0020 §3）。文字会漂移，而漂移**原本不会有测试提醒**
+（ADR-0020 自己承认的最大维护风险）。`protocol.fixtures.json` 就是为此生的：
+一份**字节级**真值向量，两个仓库的对照测试都必须复现它。
+
+**向量覆盖**（全部由主仓实现的同版本 crate 生成，meta 钉了主仓 commit）：
+
+| 段 | 内容 |
+|---|---|
+| `epoch_day` | UTC 天序号 + 负值钳零 |
+| `channel_hash` | 通道哈希：域前缀 / 0x00 分隔 / 公钥按 b64 字符串字节入哈希 / day 大端 / device_id 字典序 |
+| `wrap.signing_bytes_hex` | 协商签名材料的**字节**（含 `&[u8]` 前缀序列化为数字数组的形态） |
+| `wrap.offers` | GSRW1 的 Ed25519 签名（固定测试密钥，确定性，可重签比对） |
+| `wrap.dh_shared_secret_hex` / `record_keys` | X25519 DH 与双向记录密钥 |
+| `record.vectors` | 记录层 nonce/计数器/密文/标签逐字节 |
+| `hello_line` | 首行正例 + 8 个负例（服务器必须拒/必须按超时处理） |
+
+**本仓一侧**（已就位）：`node protocol_conformance.mjs` 用 Node 内置加密独立重算
+全部向量并比对，再拿首行真打一遍 `server.mjs`。
+
+**主仓一侧（要做的）**：把 `protocol.fixtures.json` 复制进主仓（建议
+`src-tauri/tests/fixtures/`），加一条测试用**真实实现**复现向量。骨架：
+
+```rust
+#[test]
+fn relay_wire_matches_shared_fixtures() {
+    let fx: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string("tests/fixtures/protocol.fixtures.json").unwrap(),
+    ).unwrap();
+
+    // ① 通道哈希
+    let inp = &fx["channel_hash"]["inputs"];
+    let ch = relay_seal::channel_hash(
+        inp["ed25519_pub_a_b64"].as_str().unwrap(),
+        inp["ed25519_pub_b_b64"].as_str().unwrap(),
+        inp["device_id_a"].as_str().unwrap(),
+        inp["device_id_b"].as_str().unwrap(),
+        inp["epoch_day"].as_u64().unwrap(),
+    );
+    assert_eq!(relay_seal::channel_hex(&ch), fx["channel_hash"]["expected_hex"]);
+
+    // ② 协商签名材料（逐字节）
+    let sb = relay_seal::wrap_signing_bytes(
+        inp["device_id_a"].as_str().unwrap(),
+        inp["device_id_b"].as_str().unwrap(),
+        fx["channel_hash"]["expected_hex"].as_str().unwrap(),
+        "A",
+        fx["wrap"]["offers"]["A"]["eph_pub_b64"].as_str().unwrap(),
+    );
+    assert_eq!(hex::encode(&sb), fx["wrap"]["signing_bytes_hex"]["A"]);
+
+    // ③ 记录密钥与记录层：用固定测试密钥重建 RecordSeal，
+    //    seal_frame 的输出逐字节对比 fx["record"]["vectors"][*]["record_hex"]。
+    //    （测试密钥的 seed 在 fx["wrap"]["ed25519"/"x25519_ephemeral"] 里，
+    //     全是公开测试值。）
+}
+```
+
+**改协议的流程**（两个仓库都要走）：先改主仓实现 → 同步
+`fixtures/generator/src/main.rs` 里被复制的函数 → `cargo run` 重新生成
+`protocol.fixtures.json` → 两个仓库各自跑对照测试。**谁改了线格式而没同步
+另一侧，至少有一边的对照测试会红** —— 这就是"漂移即红"。
+
+⚠️ 生成器里的函数是**逐字复制**自主仓的，它本身也可能落后。真正的裁决者是
+主仓那条用**真实实现**跑的测试：生成器只是产出向量的工具，不是第二份真相。

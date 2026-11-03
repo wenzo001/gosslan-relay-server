@@ -28,6 +28,7 @@ LAN > 跨网段/中继 > 蓝牙），填了它也不会让正常聊天绕道公�
 - [端口与防火墙](#端口与防火墙)
 - [它看得到什么、看不到什么](#它看得到什么看不到什么)
 - [协议规格](#协议规格)
+- [协议 fixture（漂移即红）](#协议-fixture漂移即红)
 - [接入指南](#接入指南) ← 要给客户端同学的都在这
 - [实测数字](#实测数字)
 - [自测与基准](#自测与基准)
@@ -270,6 +271,9 @@ GSRW1 <role A|B> <b64 临时 X25519> <b64 签名>\n
     签名覆盖 ("gosslan-relay-wrap-v1", 我的 device_id, 我期望的对端 device_id,
               通道哈希, role, 临时公钥)
     ⇒ 协商线上没有 device_id、也没有长期公钥：中继拿不到能反算通道的材料
+    ⚠️ "签名覆盖"的字节形态是 serde_json 元组：域前缀按**字节数字数组**序列化，
+    形如 [[103,111,…,49],"我的id","对端id","通道哈希","A","临时公钥b64"] ——
+    不是字符串拼接。字节级真值见下面的协议 fixture。
 
 [之后每一帧]
 4 字节大端长度 ‖ ChaCha20Poly1305( 8字节递增计数器 ‖ 4字节大端长度 ‖ JSON 帧 )
@@ -281,6 +285,29 @@ GSRW1 <role A|B> <b64 临时 X25519> <b64 签名>\n
 
 再往里的 `JSON 帧` 就是 Gosslan 的正常协议 —— 与局域网里跑的**完全相同**，
 所以这个功能不需要任何新的协议帧，老版本设备也不受影响。
+
+## 协议 fixture（漂移即红）
+
+上面这节是**文字**规格；文字会漂移。[`protocol.fixtures.json`](protocol.fixtures.json)
+是**字节级**的共享真值向量，覆盖：`epoch_day`、通道哈希、协商签名材料、GSRW1 的
+Ed25519 签名（固定测试密钥，确定性）、X25519 DH、双向记录密钥、记录层密文，
+以及首行的正例/负例。向量由主仓实现（`relay_seal.rs` / `relay.rs`）的**同版本
+crate** 生成（生成器源码与出处见 [`fixtures/generator/`](fixtures/generator/)，
+meta 里钉了主仓 commit）。
+
+```bash
+node protocol_conformance.mjs   # 或 npm run conformance
+```
+
+它用 Node 内置加密**独立重算**全部向量并与 fixture 比对，再拿 fixture 首行真打一遍
+`server.mjs`（正例必须被保持、负例必须被拒）。主仓侧的对应测试应加载同一份
+fixture 跑 Rust 实现（消费方式与测试骨架见
+[INTEGRATION.md「协议 fixture」](INTEGRATION.md#协议-fixture漂移即红的共享真值)）。
+**任何一侧改了线格式而没同步另一侧，至少有一边的对照测试会红。**
+
+改协议的正确流程：先改主仓实现 → 在 `fixtures/generator/` 里同步被复制的函数 →
+`cargo run` 重新生成向量 → 两个仓库各自跑对照测试。向量里的私钥/口令全是公开
+测试值，不构成任何真实部署的秘密。
 
 ## 接入指南
 
@@ -337,8 +364,9 @@ GSRW1 <role A|B> <b64 临时 X25519> <b64 签名>\n
 ## 自测与基准
 
 ```bash
-node selftest.mjs      # 9 条，退出码 0 = 全通过
-node bench.mjs 15      # 15 条电路的延迟/RSS
+node selftest.mjs            # 11 条，退出码 0 = 全通过
+node protocol_conformance.mjs # 15 条，协议 fixture 对照（漂移即红）
+node bench.mjs 15            # 15 条电路的延迟/RSS
 ```
 
 自测验的是这台机器的五条承诺（不是 Gosslan 协议）：
@@ -429,10 +457,14 @@ node bench.mjs 15      # 15 条电路的延迟/RSS
 [fwd001/gosslan-relay-server](https://github.com/fwd001/gosslan-relay-server)，
 从新位置跑 `node selftest.mjs` 验证过搬家完整性）。
 
-- 10 个文件全在本目录：`server.mjs` / `package.json` / `ecosystem.config.cjs` / `selftest.mjs`
-  / `bench.mjs` / `INTEGRATION.md` / `Dockerfile` / `gosslan-relay.service` / `README.md` / `.gitignore`
+- 全部文件都在本目录：`server.mjs` / `package.json` / `ecosystem.config.cjs` / `selftest.mjs`
+  / `protocol_conformance.mjs` / `protocol.fixtures.json` / `fixtures/generator/`
+  / `bench.mjs` / `INTEGRATION.md` / `Dockerfile` / `gosslan-relay.service` / `README.md`
+  / `CHANGELOG.md` / `.gitignore`
 - `.env` 与 `/etc/gosslan-relay.env` 已被 `.gitignore` 挡住，**口令绝不进任何仓库**
-- 「协议规格」一节完整抄录了通道哈希算法与记录层线格式，独立仓库无需回主仓查
+  （`protocol.fixtures.json` 里的私钥/口令是公开测试值，不是部署秘密）
+- 「协议规格」一节完整抄录了通道哈希算法与记录层线格式，独立仓库无需回主仓查；
+  字节级真值在 `protocol.fixtures.json`，见「协议 fixture（漂移即红）」
 - 只有两处刻意指回主仓（客户端实现与 ADR-0020），那是"另一半"，不该往这里搬
 - ⚠️ 主仓 ADR-0020「协商线格式」那段写的是 5 个字段（带长期公钥），与 `relay_seal.rs` 的
   实际实现（4 个字段，且 `WrapOffer::parse_line` 显式拒绝多余字段）不符。**本仓 README 与

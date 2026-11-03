@@ -5,3 +5,5 @@ logs/
 *.log
 node_modules/
 .DS_Store
+# fixture 生成器的 Rust 构建产物（源码与 Cargo.lock 进仓库，产物不进）
+fixtures/generator/target/
