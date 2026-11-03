@@ -51,8 +51,10 @@ LAN > 跨网段/中继 > 蓝牙），填了它也不会让正常聊天绕道公�
 sudo mkdir -p /opt/gosslan-relay && sudo cp -r . /opt/gosslan-relay/ && cd /opt/gosslan-relay
 
 # 2) 配置：复制示例文件，再把生成的强口令填进 TOKEN。
-#    口令单独放文件，不写进仓库、也不写进 PM2 配置文件：
-#    `pm2 describe` 会把 env 原样打印出来，看到口令的人就能用这台服务器转发任意字节。
+#    口令单独放文件、不写进仓库。PM2 部署形态的既定取舍：ecosystem.config.cjs 会把读到的
+#    口令放进 env.TOKEN，因此 `pm2 describe` 的 env、`pm2 save` 的 dump、进程 environ
+#    都能看到它（能操作 PM2 的账号本来也能读进程内存，口令对同一账号无法保密）。
+#    收紧措施见「日常运维」；文件权限见下方（PM2 与 systemd 不一样）。
 #    （示例文件里每一项的含义见「配置项」；不想用示例也可以手写，一行一个 K=V。）
 sudo cp gosslan-relay.env.example /etc/gosslan-relay.env
 sudo sed -i "s|^TOKEN=.*|TOKEN=$(openssl rand -hex 16)|" /etc/gosslan-relay.env
@@ -95,6 +97,17 @@ pm2 monit                                  # 实时 CPU/内存
 pm2 restart gosslan-relay --update-env     # 改了 /etc/gosslan-relay.env 或 env 参数之后
 pm2 delete gosslan-relay                   # 停并移除
 ```
+
+> **PM2 里的口令可见性（既定取舍）**：`pm2 describe gosslan-relay` 打印的 env、
+> `pm2 save` 生成的 dump、`/proc/<pid>/environ` 都能读到 `TOKEN`。不要试图靠藏 env 解决，
+> 能操作 PM2 的账号本来就能读进程内存。收紧动作：
+>
+> - 只让可信账号有权执行 `pm2`（必要时用独立账号 + sudo 白名单），别把 sudo 全开；
+> - `~/.pm2` 设成 `700`，项目目录与日志仅属主可读；
+> - `pm2 save` 的 dump 含明文 env，备份/迁移时按密钥对待，不要拷到共享目录。
+>
+> systemd 路径由 systemd 以特权读取 `EnvironmentFile` 后注入服务环境，不会进入 PM2 的
+> 进程表或 dump；两种方式不要混用。
 
 健康检查：
 

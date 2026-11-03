@@ -30,8 +30,10 @@ const path = require('node:path');
  * 口令来源，按优先级：环境变量 TOKEN → /etc/gosslan-relay.env → 同目录 .env。
  * 文件格式就是一行 `TOKEN=xxxx`。
  *
- * 口令不写进本仓库、也不写进 PM2 配置：`pm2 describe` 会把 env 原样打印出来，
- * 而拿到口令的人可以用这台服务器转发任意字节。
+ * ⚠️ 可见性取舍：读到的口令会被放进下面的 env.TOKEN，于是 PM2 会把它保存在进程表里 ——
+ * `pm2 describe` 的 env、`pm2 save` 的 dump、进程 environ 都能看到。这是 PM2 部署形态
+ * 的既定代价：口令只防"不知道口令的客户端"，不防"能操作 PM2 的本机账号"。收紧措施
+ * （限制 pm2 账号、~/.pm2 权限、dump 按密钥对待）见 README「日常运维」。
  */
 function readToken() {
   if (process.env.TOKEN) return process.env.TOKEN;
