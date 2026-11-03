@@ -4,6 +4,17 @@
 `feat` → minor，`fix`（含安全加固）→ patch，`docs`/`test` → patch。
 一 issue 一 commit 一版本。
 
+## [1.3.0] - 2026-11-03
+
+### Added
+
+- 最小 CI（`.github/workflows/ci.yml`）：push/PR 触发，ubuntu-latest + Node 22，
+  只跑 `selftest.mjs`（12 条）与 `protocol_conformance.mjs`（15 条）。零依赖，
+  不需要 npm install。README 顶部加 CI badge。
+- README 整合：部署步骤改为从 `gosslan-relay.env.example` 复制并填 TOKEN；
+  防火墙步骤注明健康端点 59994 只绑回环、不要对外放行；`/healthz` 段补响应
+  样例与判读方式（200 = 活着且事件循环在转）。
+
 ## [1.2.3] - 2026-11-03
 
 ### Changed

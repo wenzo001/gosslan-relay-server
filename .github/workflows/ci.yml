@@ -1,0 +1,23 @@
+# 最小 CI：跑这台机器的两套回归（零依赖，不需要 npm install）。
+# - selftest.mjs：服务器自身行为（配对/回收/上限/闸门，12 条）
+# - protocol_conformance.mjs：协议 fixture 对照（漂移即红，15 条）
+# 任一红 = 这次改动破坏了既有承诺或线格式，不许合。
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: selftest + protocol conformance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # 与 Dockerfile 的 node:22-alpine 同代；下限是 18
+      - name: Selftest（服务器行为 12 条）
+        run: node selftest.mjs
+      - name: Protocol conformance（fixture 对照 15 条）
+        run: node protocol_conformance.mjs

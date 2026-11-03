@@ -1,5 +1,7 @@
 # gosslan-relay-server
 
+[![CI](https://github.com/wenzo001/gosslan-relay-server/actions/workflows/ci.yml/badge.svg)](https://github.com/wenzo001/gosslan-relay-server/actions/workflows/ci.yml)
+
 Gosslan 的**公网中转**：一台只会组网的服务器。把两条 TCP 连接拼成双向字节管道，
 然后**再也不看内容** —— 不解析 Gosslan 的帧、不解析 JSON、不落盘、不缓存消息。
 断开即丢，重启即清空（全部状态就是一个 `Map` 加一个 `Set`，都在内存里）。
@@ -48,9 +50,12 @@ LAN > 跨网段/中继 > 蓝牙），填了它也不会让正常聊天绕道公�
 # 1) 代码放到位
 sudo mkdir -p /opt/gosslan-relay && sudo cp -r . /opt/gosslan-relay/ && cd /opt/gosslan-relay
 
-# 2) 口令单独放一个文件。不要写进仓库、也不要写进 PM2 配置：
+# 2) 配置：复制示例文件，再把生成的强口令填进 TOKEN。
+#    口令单独放文件，不写进仓库、也不写进 PM2 配置文件：
 #    `pm2 describe` 会把 env 原样打印出来，看到口令的人就能用这台服务器转发任意字节。
-printf 'TOKEN=%s\n' "$(openssl rand -hex 16)" | sudo tee /etc/gosslan-relay.env
+#    （示例文件里每一项的含义见「配置项」；不想用示例也可以手写，一行一个 K=V。）
+sudo cp gosslan-relay.env.example /etc/gosslan-relay.env
+sudo sed -i "s|^TOKEN=.*|TOKEN=*** rand -hex 16)|" /etc/gosslan-relay.env
 sudo chmod 600 /etc/gosslan-relay.env
 
 # 3) 启动 + 开机自启（pm2 startup 会打印一行要你再执行的 sudo 命令，照抄执行即可）
@@ -59,7 +64,8 @@ pm2 start ecosystem.config.cjs
 pm2 save
 pm2 startup
 
-# 4) 放行端口 —— 云安全组和系统防火墙都要放，只放行一边是最常见的"配了却连不上"
+# 4) 放行端口 —— 云安全组和系统防火墙都要放，只放行一边是最常见的"配了却连不上"。
+#    只需要 59993：健康端点 59994 只绑回环，**不要**对外放行。
 sudo ufw allow 59993/tcp        # RHEL 系：sudo firewall-cmd --add-port=59993/tcp --permanent && sudo firewall-cmd --reload
 ```
 
@@ -100,10 +106,21 @@ curl -fsS http://127.0.0.1:59994/healthz
 pm2 describe gosslan-relay | grep -E "status|restarts|memory"
 ```
 
-`/healthz` 回 JSON：`ok / version / protocol / uptime_s / clients / circuits /
-waiting / totals{accepted,paired,rejected,bytes}` —— 与 `[stats]` 行同源的聚合计数，
-不含任何通道哈希或载荷。Docker 镜像与 PM2 配置默认启用（只绑回环）；systemd
-需要在 env 里加 `HEALTHZ_PORT=59994`（要对外暴露先想清楚）。
+`/healthz` 回 JSON（示意）：
+
+```json
+{
+  "ok": true, "name": "gosslan-relay", "version": "1.3.0", "protocol": "GSRL1",
+  "uptime_s": 321, "clients": 2, "circuits": 1, "waiting": 0,
+  "totals": { "accepted": 10, "paired": 4, "rejected": 1, "bytes": 56789 }
+}
+```
+
+字段与 `[stats]` 行同源（聚合计数，不含任何通道哈希或载荷）。判读：**200 = 进程活着
+且事件循环在转**；连不上或非 200 = 进程死了/卡死/没启用端点。监控探针按 200 配即可，
+`totals.rejected` 持续上涨值得看日志。Docker 镜像与 PM2 配置默认启用（只绑回环，
+镜像的 HEALTHCHECK 已接它）；systemd 需要在 env 里加 `HEALTHZ_PORT=59994`
+（要对外暴露先想清楚）。
 
 进程每 60 秒打一行 `[stats] 客户端=… 电路=… 等待槽=…｜累计 接入=… 配对=… 拒绝=… 搬运=…`。
 值得盯的两个信号：`拒绝` 持续上涨（口令错的人在试，或被扫端口）、
