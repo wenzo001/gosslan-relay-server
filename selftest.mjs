@@ -14,6 +14,7 @@
  *   7. 日志必须带稳定错误码（E_BAD_HELLO / E_WAIT_TIMEOUT / E_HELLO_TIMEOUT /
  *      E_PENDING_OVERFLOW），监控才有的 grep。
  *   8. 启用了健康端点时，/healthz 必须 200 且带运行指标，未知路径 404。
+ *   9. 连接数达 MAX_CLIENTS 时新连接被拒（带错误码），释放槽位后可再接入。
  *
  * 跑法：TOKEN=… node selftest.mjs   （退出码 0 = 全部通过）
  */
@@ -243,6 +244,51 @@ await test('健康端点 /healthz 返回 200 与运行指标；未知路径 404'
   assert.ok(body.totals && Number.isFinite(body.totals.accepted), '累计计数必须在');
   const miss = await fetch(`http://127.0.0.1:${HZPORT}/nope`);
   assert.equal(miss.status, 404, '未知路径必须 404，不能什么都回 200');
+});
+
+// ── 9：MAX_CLIENTS 上限与槽位回收（单独起一个小上限进程，不占主测进程） ──
+await test('连接数达上限时新连接被拒；释放槽位后可再接入', async () => {
+  const capPort = PORT + 1500;
+  const capped = spawn(process.execPath, [new URL('./server.mjs', import.meta.url).pathname], {
+    env: {
+      ...process.env,
+      TOKEN,
+      PORT: String(capPort),
+      HOST: '127.0.0.1',
+      MAX_CLIENTS: '2',
+      HELLO_TIMEOUT_MS: '30000', // 静默占位连接在测试期间不被首行超时干扰
+      STATS: '0',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let capOut = '';
+  capped.stdout.on('data', (b) => (capOut += b.toString()));
+  capped.stderr.on('data', (b) => (capOut += b.toString()));
+  await new Promise((r) => capped.stdout.once('data', r));
+  const connectCap = () =>
+    new Promise((resolve, reject) => {
+      const s = net.connect(capPort, '127.0.0.1', () => resolve(s));
+      s.on('error', reject);
+    });
+  try {
+    const c1 = await connectCap();
+    const c2 = await connectCap();
+    await sleep(100);
+    const c3 = await connectCap();
+    await assertRejected(c3); // 第 3 条必须被拒（MAX_CLIENTS=2）
+    assert.ok(!c1.destroyed && !c2.destroyed, '前两条连接不得被误拒');
+    c1.destroy(); // 释放一个槽位
+    await sleep(150);
+    const c4 = await connectCap();
+    await sleep(300);
+    assert.ok(!c4.destroyed, '槽位释放后新连接必须被接受');
+    c2.destroy();
+    c4.destroy();
+    await sleep(100);
+    assert.ok(capOut.includes('E_MAX_CLIENTS'), '上限拒绝日志必须带错误码');
+  } finally {
+    capped.kill('SIGTERM');
+  }
 });
 
 child.kill('SIGTERM');

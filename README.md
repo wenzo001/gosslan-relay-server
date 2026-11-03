@@ -156,8 +156,9 @@ waiting / totals{accepted,paired,rejected,bytes}` —— 与 `[stats]` 行同源
 
 ## 配置项
 
-全部通过环境变量给（PM2 场景下写在 `/etc/gosslan-relay.env` 里，一行一个 `K=V`）。
-值不是正整数的一律回落到默认值并打一行提示，不会带着坏配置继续跑。
+全部通过环境变量给（PM2 场景下写在 `/etc/gosslan-relay.env` 里，一行一个 `K=V`；
+仓库里有 [`gosslan-relay.env.example`](gosslan-relay.env.example) 可直接复制修改）。
+值不是合法正整数的（端口越界也算）一律回落到默认值并打一行提示，不会带着坏配置继续跑。
 
 | 变量 | 默认 | 含义 |
 |---|---|---|
@@ -364,7 +365,7 @@ fixture 跑 Rust 实现（消费方式与测试骨架见
 ## 自测与基准
 
 ```bash
-node selftest.mjs            # 11 条，退出码 0 = 全通过
+node selftest.mjs            # 12 条，退出码 0 = 全通过
 node protocol_conformance.mjs # 15 条，协议 fixture 对照（漂移即红）
 node bench.mjs 15            # 15 条电路的延迟/RSS
 ```

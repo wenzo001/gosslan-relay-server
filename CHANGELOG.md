@@ -4,6 +4,16 @@
 `feat` → minor，`fix`（含安全加固）→ patch，`docs`/`test` → patch。
 一 issue 一 commit 一版本。
 
+## [1.2.2] - 2026-11-03
+
+### Added
+
+- `selftest.mjs` 补 `MAX_CLIENTS` 上限与槽位回收用例：满上限时新连接被拒
+  （带 `E_MAX_CLIENTS` 码）、已有连接不误伤、释放槽位后可再接入（12/12 通过）。
+  此前"撞上限后的回收"是唯一没有自测覆盖的资源路径。
+- `gosslan-relay.env.example`：全量环境变量示例（含生成强口令的提示），
+  复制为 `/etc/gosslan-relay.env` 即可；README 配置项一节加了指引。
+
 ## [1.2.1] - 2026-11-03
 
 ### Added
