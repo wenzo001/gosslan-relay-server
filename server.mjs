@@ -68,6 +68,25 @@ if (!TOKEN) {
   process.exit(2);
 }
 
+// 弱口令 + 对外监听 = 邀请全网来爆破。`openssl rand -hex 16` 是文档里的标准生成方式
+// （32 字符），这里卡 16 字符下限：比它短的口令在公网上撑不住离线字典。回环绑定
+// （本机联调，见 INTEGRATION §7）放行但警告 —— bench/本地 nc 联调用的都是短口令。
+const MIN_TOKEN_LEN = 16;
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
+if (TOKEN.length < MIN_TOKEN_LEN) {
+  if (LOOPBACK_HOSTS.has(HOST)) {
+    console.warn(
+      `[gosslan-relay] TOKEN 短于 ${MIN_TOKEN_LEN} 字符；因监听回环地址 ${HOST} 放行，仅限本机联调。`,
+    );
+  } else {
+    console.error(
+      `[gosslan-relay] TOKEN 短于 ${MIN_TOKEN_LEN} 字符且监听 ${HOST}（非回环）：拒绝启动。`,
+    );
+    console.error('  弱口令在公网上等于没有口令。生成强口令：openssl rand -hex 16');
+    process.exit(2);
+  }
+}
+
 /** channel hex → 正在等对端的连接（每个通道最多一个等待者）。 */
 const waiting = new Map();
 /** 已配对电路。 */

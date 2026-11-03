@@ -10,6 +10,7 @@
  *   4. 任一端断开 ⇒ 两端一起干净退出；等待超时 ⇒ 不泄漏槽位；
  *   5. 对端迟迟不来时，单侧灌进来的字节最多暂存 PENDING_MAX 就被拒
  *      —— 这是"不缓存消息"的定量版本：这条挂了，说明这台机器在替人存东西。
+ *   6. 弱口令（<16 字符）不许监听非回环地址 —— 启动闸门，公网弱口令等于开放代理。
  *
  * 跑法：TOKEN=… node selftest.mjs   （退出码 0 = 全部通过）
  */
@@ -201,6 +202,19 @@ await test('对端不来时，单侧灌入超过 PENDING_MAX 即被拒，不会�
   // 不检查耗时的话，等待超时（2s）也会关掉连接 ⇒ 这条会假通过。
   assert.ok(took < 1500, `关闭来得太晚（${took}ms），像是等待超时干的，不是暂存上限干的`);
   A.destroy();
+});
+
+// ── 7：弱口令不许上公网（启动闸门，不占主测服务器） ───────────────────────
+await test('弱口令（<16 字符）监听非回环地址时以退出码 2 拒绝启动', async () => {
+  const probe = spawn(process.execPath, [new URL('./server.mjs', import.meta.url).pathname], {
+    env: { ...process.env, TOKEN: 'short', PORT: String(PORT + 500), HOST: '0.0.0.0' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let err = '';
+  probe.stderr.on('data', (b) => (err += b.toString()));
+  const code = await new Promise((r) => probe.on('exit', r));
+  assert.equal(code, 2, '必须以退出码 2 拒绝启动，而不是带着弱口令跑起来');
+  assert.ok(err.includes('TOKEN 短于'), '拒绝原因必须说清是口令太短');
 });
 
 child.kill('SIGTERM');

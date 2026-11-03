@@ -64,6 +64,8 @@ sudo ufw allow 59993/tcp        # RHEL 系：sudo firewall-cmd --add-port=59993/
 
 配置文件找口令的顺序是 `TOKEN` 环境变量 → `/etc/gosslan-relay.env` → 同目录 `.env`。
 **没有口令就以退出码 2 拒绝启动**，不会警告一声照跑 —— 没口令的中继就是个开放代理。
+同理，**口令短于 16 字符且监听非回环地址也拒绝启动**（弱口令在公网上撑不住离线字典）；
+回环绑定（`127.0.0.1` / `localhost` / `::1`）放行但打警告，仅供本机联调。
 
 日志只有一类事件行（接入/配对/拒绝/统计），不含任何载荷。装个切割，不然几周写满小盘：
 
@@ -357,7 +359,7 @@ node bench.mjs 15      # 15 条电路的延迟/RSS
 | 换天之后一阵子连不上 | 通道哈希按天轮换，两端各算了一天 | 等下一轮重拨即自愈，属预期 |
 | PM2 起不来，报 `require is not defined` | 配置文件后缀不对（必须是 `.cjs`） | `pm2 start ecosystem.config.cjs` |
 | PM2 起了但配对永不成功 | 被改成了 `cluster` 模式或多实例 | `pm2 describe` 看 `exec mode` 必须是 `fork`、instances=1 |
-| PM2 里看到反复重启、日志只有两行 | 口令没读到（`/etc/gosslan-relay.env` 对运行用户不可读），或端口被占 | 应用日志会写 `必须设置 TOKEN…` 或 `监听 … 失败：EADDRINUSE`；口令文件读不动时 PM2 侧会先打一行 `读不到 /etc/gosslan-relay.env（EACCES）` |
+| PM2 里看到反复重启、日志只有两行 | 口令没读到（`/etc/gosslan-relay.env` 对运行用户不可读）、口令弱于 16 字符，或端口被占 | 应用日志会写 `必须设置 TOKEN…`、`TOKEN 短于 16 字符…拒绝启动` 或 `监听 … 失败：EADDRINUSE`；口令文件读不动时 PM2 侧会先打一行 `读不到 /etc/gosslan-relay.env（EACCES）` |
 
 ## 已知边界（是取舍，不是待办）
 
