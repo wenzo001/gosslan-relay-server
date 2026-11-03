@@ -31,25 +31,31 @@ import http from 'node:http';
 import { readFileSync } from 'node:fs';
 import { createHash, timingSafeEqual } from 'node:crypto';
 
+/** setTimeout 的硬上限：更大的毫秒值会被 Node 截成 1ms 立即触发（TimeoutOverflowWarning）。 */
+const MAX_TIMER_MS = 2_147_483_647;
+/** 配置项的防御性上界：默认值远低于它们，只把误配/离谱值挡在启动期，不影响正常调优。 */
+const MAX_CLIENTS_LIMIT = 4096;
+const PENDING_MAX_LIMIT = 64 * 1024 * 1024;
+
 const PORT = Number(envInt('PORT', 59993, 65535));
 const HOST = process.env.HOST ?? '0.0.0.0';
 const TOKEN = process.env.TOKEN ?? '';
 /** 同时存活的客户端连接上限（含等待配对的）。30 人规模留了 4 倍余量。 */
-const MAX_CLIENTS = Number(envInt('MAX_CLIENTS', 128));
+const MAX_CLIENTS = Number(envInt('MAX_CLIENTS', 128, MAX_CLIENTS_LIMIT));
 /** 首行超时：连上却不说话的连接一律掐掉，不给它占坑的机会。 */
-const HELLO_TIMEOUT_MS = Number(envInt('HELLO_TIMEOUT_MS', 10_000));
+const HELLO_TIMEOUT_MS = Number(envInt('HELLO_TIMEOUT_MS', 10_000, MAX_TIMER_MS));
 /**
  * 等对端来配对的上限时间；超时放弃。
  * ⚠️ 别把这个值往客户端的协商看门狗之下压（现在主仓是 10s）：有效会合窗口是
  * min(客户端 socket 存活期, 本值)，调小只会降低配对成功率，不会提高。
  * 它同时是"首行已被接受"这个信号的长度（服务器不发消息，关闭时机就是回复，见 README 协议规格）。
  */
-const WAIT_TIMEOUT_MS = Number(envInt('WAIT_TIMEOUT_MS', 30_000));
+const WAIT_TIMEOUT_MS = Number(envInt('WAIT_TIMEOUT_MS', 30_000, MAX_TIMER_MS));
 /**
  * 已配对电路的空闲阈值：客户端心跳 5s、Presence 10s，超过阈值即判死。
  * 实际回收发生在 IDLE ~ IDLE + min(30s, IDLE)：判断在周期性清扫里做，不是每电路独立定时器。
  */
-const IDLE_TIMEOUT_MS = Number(envInt('IDLE_TIMEOUT_MS', 180_000));
+const IDLE_TIMEOUT_MS = Number(envInt('IDLE_TIMEOUT_MS', 180_000, MAX_TIMER_MS));
 /**
  * 等待阶段替对端暂存的字节上限（每连接）。它和 MAX_CLIENTS 是相乘的 —— 这台进程的
  * 应用层缓冲上界就是两者之积：早期给 8MiB（×128 ≈ 1GiB）能被一个连上就不停写字节、
@@ -57,7 +63,7 @@ const IDLE_TIMEOUT_MS = Number(envInt('IDLE_TIMEOUT_MS', 180_000));
  * MemoryMax=192M 装得下，PM2 的 160M 会先重启一次（两种都兜住整机）。
  * 诚实客户端在等待期只发一条 ≤512 字节的协商线，1MiB 仍是两千倍余量。
  */
-const PENDING_MAX = Number(envInt('PENDING_MAX', 1024 * 1024));
+const PENDING_MAX = Number(envInt('PENDING_MAX', 1024 * 1024, PENDING_MAX_LIMIT));
 /** 是否打印事件行（不含任何载荷）。 */
 const LOG_EVENTS = process.env.LOG !== '0';
 /**
