@@ -58,7 +58,11 @@ sudo mkdir -p /opt/gosslan-relay && sudo cp -r . /opt/gosslan-relay/ && cd /opt/
 #    （示例文件里每一项的含义见「配置项」；不想用示例也可以手写，一行一个 K=V。）
 sudo cp gosslan-relay.env.example /etc/gosslan-relay.env
 sudo sed -i "s|^TOKEN=.*|TOKEN=$(openssl rand -hex 16)|" /etc/gosslan-relay.env
+#    PM2 路径：文件必须归「运行 PM2 的那个用户」并可读（PM2 不以 root 跑）。
+#    若 PM2 就是当前登录用户，下面一行可直接用；否则把两个 $(id -…) 换成该用户/组。
+sudo chown "$(id -un):$(id -gn)" /etc/gosslan-relay.env
 sudo chmod 600 /etc/gosslan-relay.env
+#    （systemd 路径不要执行上面两行：那里保持 root:root + 600，见下方说明。）
 
 # 3) 启动 + 开机自启（pm2 startup 会打印一行要你再执行的 sudo 命令，照抄执行即可）
 npm i -g pm2
@@ -87,6 +91,10 @@ pm2 set pm2-logrotate:retain 14
 > 不习惯 PM2 的话，仓库里另有 `gosslan-relay.service`（systemd，收紧得更狠）和
 > `Dockerfile`（非 root 镜像）。**装一个就行，别混用** —— 两边都会去抢 59993。
 > 两者的安装步骤都写在各自文件头部注释里。
+>
+> **口令文件权限按部署形态分开**：PM2 路径按上面第 2 步 `chown` 给 PM2 运行用户 + `600`
+> （PM2 进程要能读到）；systemd 路径保持 `root:root` + `600`，`EnvironmentFile=` 由 systemd
+> 以特权读取，服务进程（`DynamicUser`）不需要、也不该能读这个文件。两边不要共用一套权限。
 
 ## 日常运维
 
@@ -447,7 +455,7 @@ node bench.mjs 15            # 15 条电路的延迟/RSS
 | 换天之后一阵子连不上 | 通道哈希按天轮换，两端各算了一天 | 等下一轮重拨即自愈，属预期 |
 | PM2 起不来，报 `require is not defined` | 配置文件后缀不对（必须是 `.cjs`） | `pm2 start ecosystem.config.cjs` |
 | PM2 起了但配对永不成功 | 被改成了 `cluster` 模式或多实例 | `pm2 describe` 看 `exec mode` 必须是 `fork`、instances=1 |
-| PM2 里看到反复重启、日志只有两行 | 口令没读到（`/etc/gosslan-relay.env` 对运行用户不可读）、口令弱于 16 字符，或端口被占 | 应用日志会写 `必须设置 TOKEN…`、`TOKEN 短于 16 字符…拒绝启动` 或 `监听 … 失败：EADDRINUSE`；口令文件读不动时 PM2 侧会先打一行 `读不到 /etc/gosslan-relay.env（EACCES）` |
+| PM2 里看到反复重启、日志只有两行 | 口令没读到（PM2 路径下 `/etc/gosslan-relay.env` 须 `chown` 给 PM2 运行用户并可读；systemd 路径保持 `root:root` + `600` 才是对的）、口令弱于 16 字符，或端口被占 | 应用日志会写 `必须设置 TOKEN…`、`TOKEN 短于 16 字符…拒绝启动` 或 `监听 … 失败：EADDRINUSE`；口令文件读不动时 PM2 侧会先打一行 `读不到 /etc/gosslan-relay.env（EACCES）` |
 
 ## 已知边界（是取舍，不是待办）
 
