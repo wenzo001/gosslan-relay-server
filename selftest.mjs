@@ -184,15 +184,24 @@ await test('等不到对端时自己退出，且槽位可被后来者复用', as
   D.destroy();
 });
 
-// ── 4c：空闲电路被回收 ────────────────────────────────────────────────────
+// ── 4c：空闲电路被回收（耗时必须落在 IDLE ~ IDLE+清扫周期，排除等待超时顶替）──
 await test('长期无字节的电路被空闲回收', async () => {
   const A = await connect();
   const B = await connect();
   A.write(`GSRL1 ${TOKEN} ${ch('7')}\n`);
   await sleep(80);
   B.write(`GSRL1 ${TOKEN} ${ch('7')}\n`);
+  const t0 = Date.now();
   const closed = new Promise((r) => B.once('close', r));
-  await closed; // IDLE_TIMEOUT_MS = 3s（两端此后不再发任何字节）
+  await closed; // 此后两端不再发任何字节
+  const took = Date.now() - t0;
+  const IDLE = 3000; // 与上面的 IDLE_TIMEOUT_MS 一致
+  const SWEEP = Math.min(30_000, IDLE); // server.mjs 的清扫周期 = min(30s, IDLE)
+  // 等待超时（2s）也会关连接；先排除它，再卡上界，避免"清扫器没跑"也假绿
+  assert.ok(took > 2000, `关闭耗时 ${took}ms ≤ WAIT_TIMEOUT(2000ms)，可能是等待超时而非空闲回收`);
+  assert.ok(took <= IDLE + SWEEP + 1000, `关闭耗时 ${took}ms 超过 IDLE+清扫周期，空闲清扫没有按预期工作`);
+  await sleep(100); // 等事件行落到 stdout
+  assert.ok(out.includes('原因=idle'), '空闲回收的事件行必须带 原因=idle');
   A.destroy();
 });
 
