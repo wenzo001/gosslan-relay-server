@@ -4,6 +4,14 @@
 `feat` → minor，`fix`（含安全加固）→ patch，`docs`/`test` → patch。
 一 issue 一 commit 一版本。
 
+## [1.2.3] - 2026-11-03
+
+### Changed
+
+- 仓库 GitHub 账号改名（fwd001 → wenzo001，GitHub 重定向提示为准），
+  README 与 systemd 单元里的仓库链接同步更新；本地 origin 已指向新地址。
+  旧链接目前仍可重定向，不阻塞任何功能。
+
 ## [1.2.2] - 2026-11-03
 
 ### Added

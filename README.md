@@ -8,7 +8,7 @@ Gosslan 的**公网中转**：一台只会组网的服务器。把两条 TCP 连
 于是"跨网段"这条路本来就没有路。**局域网能连上时它完全不参与**（客户端链路优先级
 LAN > 跨网段/中继 > 蓝牙），填了它也不会让正常聊天绕道公网。
 
-> **这里就是唯一的正本**：<https://github.com/fwd001/gosslan-relay-server>，
+> **这里就是唯一的正本**：<https://github.com/wenzo001/gosslan-relay-server>，
 > 跑起来只需要这个目录里的东西。Gosslan 主仓**不再保留副本**（主仓提交 `5bf910b`
 > 已把服务器目录移出，只留独立仓库指针），所以不存在"两边同名文件要同步"这回事。
 >
@@ -455,7 +455,7 @@ node bench.mjs 15            # 15 条电路的延迟/RSS
 ## 独立仓库的同步约定
 
 本目录已经是完整可运行单元（2026-09-21 已建独立仓库
-[fwd001/gosslan-relay-server](https://github.com/fwd001/gosslan-relay-server)，
+[wenzo001/gosslan-relay-server](https://github.com/wenzo001/gosslan-relay-server)，
 从新位置跑 `node selftest.mjs` 验证过搬家完整性）。
 
 - 全部文件都在本目录：`server.mjs` / `package.json` / `ecosystem.config.cjs` / `selftest.mjs`
