@@ -55,7 +55,7 @@ sudo mkdir -p /opt/gosslan-relay && sudo cp -r . /opt/gosslan-relay/ && cd /opt/
 #    `pm2 describe` 会把 env 原样打印出来，看到口令的人就能用这台服务器转发任意字节。
 #    （示例文件里每一项的含义见「配置项」；不想用示例也可以手写，一行一个 K=V。）
 sudo cp gosslan-relay.env.example /etc/gosslan-relay.env
-sudo sed -i "s|^TOKEN=.*|TOKEN=*** rand -hex 16)|" /etc/gosslan-relay.env
+sudo sed -i "s|^TOKEN=.*|TOKEN=$(openssl rand -hex 16)|" /etc/gosslan-relay.env
 sudo chmod 600 /etc/gosslan-relay.env
 
 # 3) 启动 + 开机自启（pm2 startup 会打印一行要你再执行的 sudo 命令，照抄执行即可）
