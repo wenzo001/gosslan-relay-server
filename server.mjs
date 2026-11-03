@@ -45,7 +45,10 @@ const HELLO_TIMEOUT_MS = Number(envInt('HELLO_TIMEOUT_MS', 10_000));
  * 它同时是"首行已被接受"这个信号的长度（服务器不发消息，关闭时机就是回复，见 README 协议规格）。
  */
 const WAIT_TIMEOUT_MS = Number(envInt('WAIT_TIMEOUT_MS', 30_000));
-/** 已配对电路的空闲上限：客户端心跳 5s、Presence 10s，180s 无字节即判死。 */
+/**
+ * 已配对电路的空闲阈值：客户端心跳 5s、Presence 10s，超过阈值即判死。
+ * 实际回收发生在 IDLE ~ IDLE + min(30s, IDLE)：判断在周期性清扫里做，不是每电路独立定时器。
+ */
 const IDLE_TIMEOUT_MS = Number(envInt('IDLE_TIMEOUT_MS', 180_000));
 /**
  * 等待阶段替对端暂存的字节上限（每连接）。它和 MAX_CLIENTS 是相乘的 —— 这台进程的
