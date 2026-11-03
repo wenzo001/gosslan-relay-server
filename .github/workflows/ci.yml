@@ -1,5 +1,5 @@
 # 最小 CI：跑这台机器的两套回归 + fixture 重生成比对（零依赖，不需要 npm install）。
-# - selftest.mjs：服务器自身行为（配对/回收/上限/闸门，12 条）
+# - selftest.mjs：服务器自身行为（配对/回收/上限/闸门，14 条）
 # - protocol_conformance.mjs：协议 fixture 对照（漂移即红，15 条）
 # - fixture 重生成：用 fixtures/generator 重新生成并与已提交的 protocol.fixtures.json
 #   逐字节比对，防止「改了生成器/忘了重生成 fixture」的漂移。
@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22 # 与 Dockerfile 的 node:22-alpine 同代；下限是 18
-      - name: Selftest（服务器行为 12 条）
+      - name: Selftest（服务器行为 14 条）
         run: node selftest.mjs
       - name: Protocol conformance（fixture 对照 15 条）
         run: node protocol_conformance.mjs
