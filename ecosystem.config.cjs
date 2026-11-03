@@ -83,6 +83,8 @@ module.exports = {
         MAX_CLIENTS: '128',
         LOG: '1',
         STATS: '1',
+        // 健康检查端点（默认只绑回环，供本机探针/监控抓取 /healthz）。
+        HEALTHZ_PORT: '59994',
       },
 
       // 日志只有事件行（接入/配对/拒绝/统计），不含任何载荷。

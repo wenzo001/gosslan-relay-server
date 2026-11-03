@@ -4,6 +4,24 @@
 `feat` → minor，`fix`（含安全加固）→ patch，`docs`/`test` → patch。
 一 issue 一 commit 一版本。
 
+## [1.2.0] - 2026-11-03
+
+### Added
+
+- 可选健康检查端点：`HEALTHZ_PORT` 设置后，`GET /healthz` 返回运行指标 JSON
+  （ok/version/protocol/uptime_s/clients/circuits/waiting/totals，与 `[stats]`
+  行同源的聚合计数，不含通道哈希与载荷）。`HEALTHZ_HOST` 默认 `127.0.0.1`。
+  比 `nc -z` 多证明事件循环与配对表还活着。不设 = 不启用，中继主协议零影响。
+  PM2 配置与 Docker 镜像默认启用（容器内回环 59994），Dockerfile HEALTHCHECK
+  由 `nc -z` 升级为 wget 真探测；systemd 单元给出可选注释行。
+- `selftest.mjs` 新增健康端点用例（200/指标/404，11/11 通过）。
+
+### Fixed
+
+- `PORT=999999`（正整数但越界）此前会以未捕获的 `ERR_SOCKET_BAD_PORT` 裸栈崩掉
+  —— `envInt` 注释声称已修，实测没有。现在 `envInt` 支持上界，`PORT` 按 ≤65535
+  校验，越界回落默认值并打一行能照着修的话（2026-11-03 实测复现并验证修复）。
+
 ## [1.1.0] - 2026-11-03
 
 ### Added

@@ -11,6 +11,9 @@
  *   5. 对端迟迟不来时，单侧灌进来的字节最多暂存 PENDING_MAX 就被拒
  *      —— 这是"不缓存消息"的定量版本：这条挂了，说明这台机器在替人存东西。
  *   6. 弱口令（<16 字符）不许监听非回环地址 —— 启动闸门，公网弱口令等于开放代理。
+ *   7. 日志必须带稳定错误码（E_BAD_HELLO / E_WAIT_TIMEOUT / E_HELLO_TIMEOUT /
+ *      E_PENDING_OVERFLOW），监控才有的 grep。
+ *   8. 启用了健康端点时，/healthz 必须 200 且带运行指标，未知路径 404。
  *
  * 跑法：TOKEN=… node selftest.mjs   （退出码 0 = 全部通过）
  */
@@ -22,6 +25,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 
 const TOKEN = 'selftest-token-please-ignore';
 const PORT = 25993 + (process.pid % 500);
+const HZPORT = PORT + 1000; // 健康端点测试端口（与主端口、bench 端口区间都不撞）
 
 const child = spawn(process.execPath, [new URL('./server.mjs', import.meta.url).pathname], {
   env: {
@@ -35,6 +39,7 @@ const child = spawn(process.execPath, [new URL('./server.mjs', import.meta.url).
     IDLE_TIMEOUT_MS: '3000',
     PENDING_MAX: '4096',
     STATS: '0',
+    HEALTHZ_PORT: String(HZPORT),
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -222,6 +227,22 @@ await test('弱口令（<16 字符）监听非回环地址时以退出码 2 拒�
   const code = await new Promise((r) => probe.on('exit', r));
   assert.equal(code, 2, '必须以退出码 2 拒绝启动，而不是带着弱口令跑起来');
   assert.ok(err.includes('TOKEN 短于'), '拒绝原因必须说清是口令太短');
+});
+
+// ── 8：健康检查端点（可选功能，启用时不得装死） ───────────────────────────
+await test('健康端点 /healthz 返回 200 与运行指标；未知路径 404', async () => {
+  const res = await fetch(`http://127.0.0.1:${HZPORT}/healthz`);
+  assert.equal(res.status, 200, '/healthz 必须 200');
+  const body = await res.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.protocol, 'GSRL1');
+  assert.ok(typeof body.version === 'string' && body.version.length > 0);
+  for (const k of ['uptime_s', 'clients', 'circuits', 'waiting']) {
+    assert.ok(Number.isFinite(body[k]), `指标缺 ${k}`);
+  }
+  assert.ok(body.totals && Number.isFinite(body.totals.accepted), '累计计数必须在');
+  const miss = await fetch(`http://127.0.0.1:${HZPORT}/nope`);
+  assert.equal(miss.status, 404, '未知路径必须 404，不能什么都回 200');
 });
 
 child.kill('SIGTERM');

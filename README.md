@@ -92,9 +92,17 @@ pm2 delete gosslan-relay                   # 停并移除
 健康检查：
 
 ```bash
+# 粗查：端口在监听
 nc -z 127.0.0.1 59993 && echo ok
+# 真查（推荐）：设置过 HEALTHZ_PORT 时，进程活着且事件循环在转才回 200
+curl -fsS http://127.0.0.1:59994/healthz
 pm2 describe gosslan-relay | grep -E "status|restarts|memory"
 ```
+
+`/healthz` 回 JSON：`ok / version / protocol / uptime_s / clients / circuits /
+waiting / totals{accepted,paired,rejected,bytes}` —— 与 `[stats]` 行同源的聚合计数，
+不含任何通道哈希或载荷。Docker 镜像与 PM2 配置默认启用（只绑回环）；systemd
+需要在 env 里加 `HEALTHZ_PORT=59994`（要对外暴露先想清楚）。
 
 进程每 60 秒打一行 `[stats] 客户端=… 电路=… 等待槽=…｜累计 接入=… 配对=… 拒绝=… 搬运=…`。
 值得盯的两个信号：`拒绝` 持续上涨（口令错的人在试，或被扫端口）、
@@ -162,6 +170,8 @@ pm2 describe gosslan-relay | grep -E "status|restarts|memory"
 | `PENDING_MAX` | `1048576` | **单条连接**在等对端期间的暂存硬上界，超了直接拒这条连接。整机最坏上界见下面那条注 |
 | `LOG` | `1` | `0` = 不打事件行。事件行里本来就没有载荷 |
 | `STATS` | `1` | `0` = 不打每 60 秒的统计行 |
+| `HEALTHZ_PORT` | 不设 = 不启用 | 健康检查 HTTP 端点（`GET /healthz` 返回运行指标 JSON）。Docker 镜像默认 `59994` |
+| `HEALTHZ_HOST` | `127.0.0.1` | 健康端点绑定地址。默认只绑回环；对外暴露会多一个能读聚合计数的读取者 |
 
 > **`MAX_CLIENTS` 与 `PENDING_MAX` 是相乘的**，这笔账就是这台进程的应用层缓冲上界，
 > 只在这里算一次：默认 128 × 1 MiB = **128 MiB 缓冲**，加上约 46 MiB 的 Node 运行时

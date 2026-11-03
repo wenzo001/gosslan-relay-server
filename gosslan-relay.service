@@ -25,6 +25,9 @@ ExecStart=/usr/bin/env node /opt/gosslan-relay/server.mjs
 EnvironmentFile=/etc/gosslan-relay.env
 Environment=PORT=59993
 Environment=HOST=0.0.0.0
+# 可选：健康检查端点（默认只绑 127.0.0.1，供本机探针/监控抓取）。
+# 不设则不启用；systemd 侧可另配 ExecStartPost 或 curl 探针使用。
+# Environment=HEALTHZ_PORT=59994
 
 DynamicUser=yes
 SupplementaryGroups=

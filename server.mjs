@@ -27,9 +27,11 @@
  */
 
 import net from 'node:net';
+import http from 'node:http';
+import { readFileSync } from 'node:fs';
 import { createHash, timingSafeEqual } from 'node:crypto';
 
-const PORT = Number(envInt('PORT', 59993));
+const PORT = Number(envInt('PORT', 59993, 65535));
 const HOST = process.env.HOST ?? '0.0.0.0';
 const TOKEN = process.env.TOKEN ?? '';
 /** 同时存活的客户端连接上限（含等待配对的）。30 人规模留了 4 倍余量。 */
@@ -55,6 +57,22 @@ const IDLE_TIMEOUT_MS = Number(envInt('IDLE_TIMEOUT_MS', 180_000));
 const PENDING_MAX = Number(envInt('PENDING_MAX', 1024 * 1024));
 /** 是否打印事件行（不含任何载荷）。 */
 const LOG_EVENTS = process.env.LOG !== '0';
+/**
+ * 可选健康检查端点（HTTP GET /healthz 返回运行指标 JSON）。不设 = 不启用，
+ * 中继主协议不受零影响。默认只绑回环；要对外暴露请先想清楚（指标虽无载荷，
+ * 但"谁在何时连了多少"的形状信息会多一个读取者）。
+ */
+const HEALTHZ_PORT = (() => {
+  const raw = process.env.HEALTHZ_PORT;
+  if (raw === undefined || raw === '') return 0; // 不设 = 不启用
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0 || n > 65535) {
+    console.error(`[gosslan-relay] HEALTHZ_PORT=${raw} 不是合法端口（0–65535），健康端点不启用`);
+    return 0;
+  }
+  return n;
+})();
+const HEALTHZ_HOST = process.env.HEALTHZ_HOST ?? '127.0.0.1';
 
 const MAX_LINE = 256;
 const MAGIC = 'GSRL1';
@@ -97,14 +115,15 @@ let connSeq = 0;
 
 const log = (...a) => LOG_EVENTS && console.log(new Date().toISOString(), ...a);
 
-function envInt(name, dflt) {
+function envInt(name, dflt, max = Infinity) {
   const raw = process.env[name];
   if (raw === undefined || raw === '') return String(dflt);
   const n = Number(raw);
-  // 必须真是整数：`PORT=1.5` / `999999` 过去能通过（只查 finite>0），然后在
-  // listen 里以 Node 内部栈崩掉。配置错误应当一行说清，不该留栈。
-  if (!Number.isInteger(n) || n <= 0) {
-    console.error(`[gosslan-relay] ${name}=${raw} 不是正整数，改用 ${dflt}`);
+  // 必须真是整数且在合法区间：`PORT=1.5` 过去能通过（只查 finite>0），然后在
+  // listen 里以 Node 内部栈崩掉；`PORT=999999` 是正整数但越界，同样会裸栈
+  // （ERR_SOCKET_BAD_PORT，2026-11-03 实测复现）。配置错误应当一行说清，不该留栈。
+  if (!Number.isInteger(n) || n <= 0 || n > max) {
+    console.error(`[gosslan-relay] ${name}=${raw} 不是合法正整数${max < Infinity ? `（≤${max}）` : ''}，改用 ${dflt}`);
     return String(dflt);
   }
   return raw;
@@ -360,11 +379,63 @@ server.listen(PORT, HOST, () => {
   log('[gosslan-relay] 不解析载荷、不写任何文件；进程退出即清空全部状态。');
 });
 
+// ── 可选健康检查端点（HEALTHZ_PORT 不设 = 不启用） ─────────────────────────
+// 比 `nc -z` 多证明一件事：进程的事件循环还活着、配对表还在工作内存里。
+// 只回聚合计数（与 [stats] 行同源），不回任何通道哈希/载荷；默认只绑回环。
+const VERSION = (() => {
+  try {
+    return JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
+  } catch {
+    return 'unknown'; // Docker 镜像若没带 package.json，版本号缺不了大局
+  }
+})();
+let healthServer = null;
+if (HEALTHZ_PORT > 0) {
+  healthServer = http.createServer((req, res) => {
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      res.writeHead(405, { allow: 'GET, HEAD' }).end();
+      return;
+    }
+    if (req.url !== '/healthz' && req.url !== '/') {
+      res.writeHead(404).end();
+      return;
+    }
+    const body = JSON.stringify({
+      ok: true,
+      name: 'gosslan-relay',
+      version: VERSION,
+      protocol: MAGIC,
+      uptime_s: Math.round(process.uptime()),
+      clients: stats.clients,
+      circuits: circuits.size,
+      waiting: waiting.size,
+      totals: {
+        accepted: stats.accepted,
+        paired: stats.paired,
+        rejected: stats.rejected,
+        bytes: stats.bytes,
+      },
+    });
+    res.writeHead(200, { 'content-type': 'application/json' }).end(req.method === 'HEAD' ? undefined : body);
+  });
+  healthServer.on('error', (err) => {
+    // 健康端点起不来不该拖死中继本体：留一行能查的话，继续跑。
+    console.error(
+      `[gosslan-relay] 健康端点监听 ${HEALTHZ_HOST}:${HEALTHZ_PORT} 失败：${err.code ?? err.message}（中继功能不受影响）`,
+    );
+    healthServer = null;
+  });
+  healthServer.listen(HEALTHZ_PORT, HEALTHZ_HOST, () => {
+    log(`[gosslan-relay] 健康检查 http://${HEALTHZ_HOST}:${HEALTHZ_PORT}/healthz`);
+  });
+}
+
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
     log(`[gosslan-relay] ${sig}，清理后退出`);
     for (const circuit of [...circuits]) closeCircuit(circuit, 'shutdown');
     for (const c of [...waiting.values()]) dropConn(c);
+    if (healthServer) healthServer.close();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 2_000).unref();
   });
