@@ -437,8 +437,10 @@ GNU netcat 用 `-N`，但 `-N` 会半关，同样被服务器当成退出）。
 **本仓一侧**（已就位）：`node protocol_conformance.mjs` 用 Node 内置加密独立重算
 全部向量并比对，再拿首行真打一遍 `server.mjs`。
 
-**主仓一侧（要做的）**：把 `protocol.fixtures.json` 复制进主仓（建议
-`src-tauri/tests/fixtures/`），加一条测试用**真实实现**复现向量。骨架：
+**主仓一侧（已就位）**：`src-tauri/tests/fixtures/protocol.fixtures.json` 与本仓
+`protocol.fixtures.json` **逐字节相同**（sha256 都是 `e072d544…`），对照测试
+`relay_wire_matches_shared_fixtures` 在 `src-tauri/src/transport/relay_seal.rs`，用**真实实现**
+复现向量。下面这段是当初的对接骨架（实际测试的覆盖面比它更全）：
 
 ```rust
 #[test]
