@@ -266,6 +266,36 @@ try {
     assert.equal(r.status, 400);
   });
 
+  await t('正文格式：text / markdown 都认，其余按 text', async () => {
+    const b3 = await api('/v1/client/bots', {
+      method: 'POST',
+      token: CLIENT_TOKEN,
+      json: { name: '格式', target: { kind: 'inbox' } },
+    });
+    const bid = b3.body.bot_id;
+    const mk = async (format) => {
+      const r = await api(`/v1/hooks/${bid}/messages`, {
+        method: 'POST',
+        token: b3.body.send_secret,
+        json: { text: '# 标题\n\n- 一\n- 二', format },
+      });
+      assert.equal(r.status, 202);
+      return r.body.event_id;
+    };
+    const mdId = await mk('markdown');
+    const txtId = await mk('text');
+    const weirdId = await mk('html');
+    const pull = await api(`/v1/client/bots/${bid}/pull`, {
+      method: 'POST',
+      token: b3.body.client_secret,
+      json: {},
+    });
+    const byId = Object.fromEntries(pull.body.events.map((e) => [e.event_id, e]));
+    assert.equal(byId[mdId].format, 'markdown', 'markdown 格式要如实带出去');
+    assert.equal(byId[txtId].format, 'text');
+    assert.equal(byId[weirdId].format, 'text', '不认识���格式按 text（不猜）');
+  });
+
   await t('healthz 给 readiness + 队列深度', async () => {
     const r = await api('/healthz');
     assert.equal(r.status, 200);
