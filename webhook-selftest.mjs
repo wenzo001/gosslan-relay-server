@@ -296,6 +296,44 @@ try {
     assert.equal(byId[weirdId].format, 'text', '不认识���格式按 text（不猜）');
   });
 
+  await t('暂停 ⇒ 拒收；恢复 ⇒ 又能收；撤销 ⇒ 旧密钥失效', async () => {
+    const b4 = await api('/v1/client/bots', {
+      method: 'POST',
+      token: CLIENT_TOKEN,
+      json: { name: '状态机', target: { kind: 'inbox' } },
+    });
+    const bid = b4.body.bot_id;
+    const sec = b4.body.send_secret;
+    const csec = b4.body.client_secret;
+    const setStatus = async (st) =>
+      api(`/v1/client/bots/${bid}/status`, {
+        method: 'POST',
+        token: csec,
+        json: { status: st },
+      });
+    assert.equal((await setStatus('paused')).status, 200);
+    const paused = await api(`/v1/hooks/${bid}/messages`, {
+      method: 'POST',
+      token: sec,
+      json: { text: '暂停期间' },
+    });
+    assert.equal(paused.status, 403, '暂停期间必须拒收');
+    assert.equal((await setStatus('active')).status, 200);
+    const ok = await api(`/v1/hooks/${bid}/messages`, {
+      method: 'POST',
+      token: sec,
+      json: { text: '恢复之后' },
+    });
+    assert.equal(ok.status, 202, '恢复后要能收');
+    assert.equal((await setStatus('revoked')).status, 200);
+    const revoked = await api(`/v1/hooks/${bid}/messages`, {
+      method: 'POST',
+      token: sec,
+      json: { text: '撤销之后' },
+    });
+    assert.equal(revoked.status, 401, '撤销后旧密钥必须失效');
+  });
+
   await t('healthz 给 readiness + 队列深度', async () => {
     const r = await api('/healthz');
     assert.equal(r.status, 200);
