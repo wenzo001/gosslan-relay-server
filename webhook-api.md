@@ -52,6 +52,11 @@ PM2 / systemd 的条目照抄 `ecosystem.config.cjs` 与 `gosslan-relay.service`
 
 ## 3. 外部发送方怎么发
 
+**创建机器人（客户端侧）**：`POST /v1/client/bots` 时 `target.kind` 取 `personal`
+（个人会话）或 `group`（群，必须同时给 `group_id`）；旧值 `inbox` 仍兼容并归一到
+`personal`。**两把密钥由服务端随机生成**，只在创建响应里返回一次（服务端只留 HMAC
+摘要）—— 客户端 UI 据此直接生成 endpoint + curl 示例，发送方不需要自己配密钥。
+
 **正文格式**：请求可带 `format`：`text`（默认，纯文本直接显示）或 `markdown`
 （客户端按 Markdown 渲染：标题、列表、表格、代码块、引用、链接……）。
 其他值一律按 `text` 处理（不猜、不报错）。图片**始终**走 `image[]` 附件，
