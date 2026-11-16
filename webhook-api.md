@@ -52,6 +52,12 @@ PM2 / systemd 的条目照抄 `ecosystem.config.cjs` 与 `gosslan-relay.service`
 
 ## 3. 外部发送方怎么发
 
+**正文格式**：请求可带 `format`：`text`（默认，纯文本直接显示）或 `markdown`
+（客户端按 Markdown 渲染：标题、列表、表格、代码块、引用、链接……）。
+其他值一律按 `text` 处理（不猜、不报错）。图片**始终**走 `image[]` 附件，
+Markdown 里的远程图片链接**不会**被自动加载。
+
+
 ```bash
 # 纯文字
 curl -X POST https://your-host/v1/hooks/$BOT_ID/messages \
