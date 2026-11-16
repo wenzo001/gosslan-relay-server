@@ -14,6 +14,8 @@
     "start": "node server.mjs",
     "selftest": "node selftest.mjs",
     "conformance": "node protocol_conformance.mjs",
-    "bench": "node bench.mjs"
+    "bench": "node bench.mjs",
+    "start:webhook": "node webhook.mjs",
+    "selftest:webhook": "node webhook-selftest.mjs"
   }
 }
