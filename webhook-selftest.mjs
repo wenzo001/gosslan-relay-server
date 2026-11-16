@@ -334,6 +334,25 @@ try {
     assert.equal(revoked.status, 401, '撤销后旧密钥必须失效');
   });
 
+  await t('v6 scope：personal / group 都认，群缺 group_id 被拒，旧 inbox 兼容', async () => {
+    const mk = async (target) => api('/v1/client/bots', {
+      method: 'POST', token: CLIENT_TOKEN, json: { name: 'scope', target },
+    });
+    const p = await mk({ kind: 'personal' });
+    assert.equal(p.status, 201);
+    assert.equal(p.body.target.kind, 'personal');
+    const g = await mk({ kind: 'group', group_id: 'group:abc' });
+    assert.equal(g.status, 201);
+    assert.equal(g.body.target.group_id, 'group:abc');
+    const bad = await mk({ kind: 'group' });
+    assert.equal(bad.status, 400, '群机器人没 group_id 必须拒');
+    const legacy = await mk({ kind: 'inbox' });
+    assert.equal(legacy.status, 201, '旧 inbox 仍要兼容');
+    assert.equal(legacy.body.target.kind, 'personal', '旧 inbox 归一到 personal');
+    const weird = await mk({ kind: 'channel' });
+    assert.equal(weird.status, 400);
+  });
+
   await t('healthz 给 readiness + 队列深度', async () => {
     const r = await api('/healthz');
     assert.equal(r.status, 200);
