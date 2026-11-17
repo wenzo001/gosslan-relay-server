@@ -207,6 +207,13 @@ export async function handleNotify(req, res) {
     return json(res, 200, { ok: true, id });
   }
 
+  // GET /v1/bot/<client_token> → 取回发送链接（兼容旧客户端：早期 BotRecord 没存 publish_url）
+  if (req.method === 'GET' && parts.length === 3 && parts[0] === 'v1' && parts[1] === 'bot') {
+    const bot = Object.values(bots).find((b) => b.client_token === parts[2]);
+    if (!bot) return json(res, 404, { error: 'not_found' });
+    return json(res, 200, { send_token: bot.token, publish_url: `/publish/${bot.token}` });
+  }
+
   // GET /pull/<client_token>?wait=<秒> → 取件（不删，等 ack）
   // `wait` = 长轮询：队列空时挂起，新消息入队立即返回（上限 15s，须小于客户端 HTTP 超时）。
   if (req.method === 'GET' && parts[0] === 'pull' && parts.length === 2) {
