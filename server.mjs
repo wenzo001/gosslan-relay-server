@@ -28,6 +28,9 @@
 
 import net from 'node:net';
 import http from 'node:http';
+// v7 极简通知器：复用本进程的 HTTP 端点（默认 59994），不再单独起 webhook.mjs。
+// TCP 盲中继逻辑一字未动 —— 好友/群通信依赖它。
+import { handleNotify, notifyStats, startNotifySweeper } from './notify.mjs';
 import { readFileSync } from 'node:fs';
 import { createHash, timingSafeEqual } from 'node:crypto';
 
@@ -67,13 +70,13 @@ const PENDING_MAX = Number(envInt('PENDING_MAX', 1024 * 1024, PENDING_MAX_LIMIT)
 /** 是否打印事件行（不含任何载荷）。 */
 const LOG_EVENTS = process.env.LOG !== '0';
 /**
- * 可选健康检查端点（HTTP GET /healthz 返回运行指标 JSON）。不设 = 不启用，
- * 中继主协议不受零影响。默认只绑回环；要对外暴露请先想清楚（指标虽无载荷，
- * 但"谁在何时连了多少"的形状信息会多一个读取者）。
+ * HTTP 端点（v7）：默认 59994、绑 0.0.0.0，共用给「通知 API + /healthz」。
+ * 一个进程（本文件）同时跑 TCP 盲中继(59993) 和这个 HTTP 端点 ⇒ 一个 PM2 条目即可。
+ * ⚠️ 对外暴露的是通知 API（token 在 URL），健康指标也一并可见（无载荷，只有形状信息）。
  */
 const HEALTHZ_PORT = (() => {
   const raw = process.env.HEALTHZ_PORT;
-  if (raw === undefined || raw === '') return 0; // 不设 = 不启用
+  if (raw === undefined || raw === '') return 59994; // v7：默认启用（复用原健康端口）
   const n = Number(raw);
   if (!Number.isInteger(n) || n < 0 || n > 65535) {
     console.error(`[gosslan-relay] HEALTHZ_PORT=${raw} 不是合法端口（0–65535），健康端点不启用`);
@@ -81,7 +84,7 @@ const HEALTHZ_PORT = (() => {
   }
   return n;
 })();
-const HEALTHZ_HOST = process.env.HEALTHZ_HOST ?? '127.0.0.1';
+const HEALTHZ_HOST = process.env.HEALTHZ_HOST ?? '0.0.0.0';
 
 const MAX_LINE = 256;
 const MAGIC = 'GSRL1';
@@ -401,6 +404,18 @@ const VERSION = (() => {
 let healthServer = null;
 if (HEALTHZ_PORT > 0) {
   healthServer = http.createServer((req, res) => {
+    // v7：通知 API 与健康检查共用这个 HTTP 端点。先让通知路由认领，
+    // 不是通知路径（/publish /pull /ack /v1/bots）的再走下面的 /healthz。
+    handleNotify(req, res).then((handled) => {
+      if (handled) return;
+      serveHealth(req, res);
+    }).catch((e) => {
+      console.error(`[gosslan-relay] 通知请求处理失败：${e?.message ?? e}`);
+      if (!res.headersSent) res.writeHead(500).end();
+    });
+  });
+  startNotifySweeper();
+  function serveHealth(req, res) {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.writeHead(405, { allow: 'GET, HEAD' }).end();
       return;
@@ -425,6 +440,7 @@ if (HEALTHZ_PORT > 0) {
       clients: stats.clients,
       circuits: circuits.size,
       waiting: waiting.size,
+      notify: notifyStats(),
       totals: {
         accepted: stats.accepted,
         paired: stats.paired,
@@ -433,7 +449,7 @@ if (HEALTHZ_PORT > 0) {
       },
     });
     res.writeHead(200, { 'content-type': 'application/json' }).end(req.method === 'HEAD' ? undefined : body);
-  });
+  }
   healthServer.on('error', (err) => {
     // 健康端点起不来不该拖死中继本体：留一行能查的话，继续跑。
     console.error(
@@ -442,7 +458,7 @@ if (HEALTHZ_PORT > 0) {
     healthServer = null;
   });
   healthServer.listen(HEALTHZ_PORT, HEALTHZ_HOST, () => {
-    log(`[gosslan-relay] 健康检查 http://${HEALTHZ_HOST}:${HEALTHZ_PORT}/healthz`);
+    log(`[gosslan-relay] HTTP 端点（通知 API + 健康）http://${HEALTHZ_HOST}:${HEALTHZ_PORT}`);
   });
 }
 
