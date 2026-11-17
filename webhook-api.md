@@ -1,5 +1,9 @@
 # Webhook 通知服务：外部系统 → Gosslan
 
+> ⚠️ **历史文档（v6，已废弃）**：`webhook.mjs` + 59995 + `Authorization` 头 + HMAC + 幂等键
+> 那一套协议**已删除、不兼容**。现行是 **v7**（一个进程复用 59994、token 在 URL），
+> 请看 **[`README-v7-notify.md`](README-v7-notify.md)**；本文仅作历史留存，勿据此部署。
+
 > 这份是**接口契约**，给两类人看：
 > ① **外部系统**（要往 Gosslan 发通知的人）—— 看 §3、§4；
 > ② **客户端实现者**（Gosslan 那一侧）—— 看 §2、§5、§6。

@@ -21,23 +21,25 @@ LAN > 跨网段/中继 > 蓝牙），填了它也不会让正常聊天绕道公�
 
 ---
 
-## Webhook 通知服务（独立进程 · 独立端口）
+## 通知机器人（v7）
 
-> 另一条产品线：**外部系统 → Gosslan** 的消息入口。外部系统用 HTTP POST 把文字/图片
-> 投给某个机器人，服务持久排队，**一个**在线的 Gosslan 设备取件后投进本机收件箱或某个群
-> （群消息随后由既有群 Mesh 扩散，**其他成员不必连接本服务**）。
+> 另一条产品线：**外部系统 → Gosslan** 的消息入口。当前是 **v7 极简协议**：
+> **一个进程**（`server.mjs`）、**复用 59994**（与 `/healthz` 同一个 HTTP 端点）、
+> 认证 token 放在 URL 路径里，GET / POST / PUT 都能发，一条 curl 即可。
 >
 > ⚠️ **信任模型与本页下面的盲中继完全相反**：它**看得到消息明文**、**会落盘暂存**
-> ⇒ 必须放在 **HTTPS 反向代理**后面；请不要把本服务当���「读不到内容的中继」对外宣传。
+> ⇒ 公网部署请放在 HTTPS 反代后面或限制来源 IP；不要把本服务当作「读不到内容的中继」宣传。
 >
-> - 怎么跑：`WEBHOOK_CLIENT_TOKEN=… WEBHOOK_PEPPER=… node webhook.mjs`（默认端口 59995）
-> - 接口契约与信任模型：[**`webhook-api.md`**](webhook-api.md)
-> - 自测：`node webhook-selftest.mjs`
-> - **TCP 盲中继（`server.mjs`）没有改动**：它的协议 fixture 与行为一字未动。
+> - **完整部署/使用/接入说明：[`README-v7-notify.md`](README-v7-notify.md)**（唯一权威入口）
+> - 自测：`node notify-selftest.mjs`（8 条）
+> - 旧 v6（`webhook.mjs` / 59995 / header + HMAC + 幂等键）**已删除、不兼容**；
+>   `webhook.mjs` 与 [`webhook-api.md`](webhook-api.md) 仅作历史留存，不要再照着部署。
+> - **TCP 盲中继（`server.mjs` 的 59993 部分）没有改动**：协议 fixture 与行为一字未动。
 
 ## 目录
 
 - [怎么跑起来](#怎么跑起来) ← 只有 PM2 一条路，照抄即可
+- [通知机器人（v7）](#通知机器人v7) ← 59994 对外通知 API，一条 curl 发通知
 - [日常运维](#日常运维)
 - [三个不能改的配置](#三个不能改的配置)
 - [配置项](#配置项)
@@ -85,8 +87,9 @@ pm2 save
 pm2 startup
 
 # 4) 放行端口 —— 云安全组和系统防火墙都要放，只放行一边是最常见的"配了却连不上"。
-#    只需要 59993：健康端点 59994 只绑回环，**不要**对外放行。
+#    59993 = 盲中继；59994 = v7 通知 API（要接机器人就**必须**对外放行，否则客户端连不上）。
 sudo ufw allow 59993/tcp        # RHEL 系：sudo firewall-cmd --add-port=59993/tcp --permanent && sudo firewall-cmd --reload
+sudo ufw allow 59994/tcp        # v7 通知 API + /healthz；不用机器人可不放
 ```
 
 配置文件找口令的顺序是 `TOKEN` 环境变量 → `/etc/gosslan-relay.env` → 同目录 `.env`。
@@ -158,9 +161,9 @@ pm2 describe gosslan-relay | grep -E "status|restarts|memory"
 且事件循环在转**；连不上或非 200 = 进程死了/卡死/没启用端点。监控探针按 200 配即可，
 `totals.rejected` 持续上涨值得看日志。路径按 `URL.pathname` 匹配：只认 `/healthz`——
 可以带查询串（`/healthz?x=1` 同样 200），`/` 与其它路径一律 404，非 GET/HEAD 返回 405。
-Docker 镜像与 PM2 配置默认启用（只绑回环，
-镜像的 HEALTHCHECK 已接它）；systemd 需要在 env 里加 `HEALTHZ_PORT=59994`
-（要对外暴露先想清楚）。
+v7 起 59994 同时是**通知 API**（`/publish` `/pull` `/ack` `/v1/bots`）与健康端点，
+PM2 / Docker 默认启用且绑 `0.0.0.0`（`HEALTHZ_HOST`）。**要接机器人就必须对外放行**，
+并按需配 HTTPS 反代 / 来源 IP 限制（见 [`README-v7-notify.md`](README-v7-notify.md)）。
 
 进程每 60 秒打一行 `[stats] 客户端=… 电路=… 等待槽=…｜累计 接入=… 配对=… 拒绝=… 搬运=…`。
 值得盯的两个信号：`拒绝` 持续上涨（口令错的人在试，或被扫端口）、
@@ -230,8 +233,13 @@ Docker 镜像与 PM2 配置默认启用（只绑回环，
 | `PENDING_MAX` | `1048576` | 1–67108864 | **单条连接**在等对端期间的暂存硬上界，超了直接拒这条连接。整机最坏上界见下面那条注 |
 | `LOG` | `1` | — | `0` = 不打事件行。事件行里本来就没有载荷 |
 | `STATS` | `1` | — | `0` = 不打每 60 秒的统计行 |
-| `HEALTHZ_PORT` | 不设 = 不启用 | 0–65535（`0` = 不启用） | 健康检查 HTTP 端点（`GET /healthz` 返回运行指标 JSON）。Docker 镜像默认 `59994` |
-| `HEALTHZ_HOST` | `127.0.0.1` | — | 健康端点绑定地址。默认只绑回环；对外暴露会多一个能读聚合计数的读取者 |
+| `HEALTHZ_PORT` | `59994`（PM2/Docker） | 0–65535（`0` = 不启用） | **v7 通知 API + `/healthz`**，同一 HTTP 端点。设 `0` 会同时关掉机器人通知 |
+| `HEALTHZ_HOST` | `0.0.0.0` | — | 通知 API / 健康端点绑定地址。**要接机器人必须非回环**；`127.0.0.1` 会让外部客户端连不上 |
+
+| `NOTIFY_TTL_MS` | `604800000` | >0 | 未送达通知留存期（默认 7 天） |
+| `NOTIFY_MAX_EVENTS` | `10000` | >0 | 全服队列硬上限，满了 503 |
+| `NOTIFY_PULL_MAX` | `50` | >0 | 单次取件上限 |
+| `WEBHOOK_DATA_DIR` | `./webhook-data` | — | v7 队列落盘目录（`notify-*.json`） |
 
 > 毫秒类变量的上界是 `2147483647`（`setTimeout` 的硬上限；再大 Node 会当成 1ms 立即触发）。
 > `MAX_CLIENTS` 与 `PENDING_MAX` 的防御性上界分别是 4096 与 64MiB，只为挡住误配/离谱值，
