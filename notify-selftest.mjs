@@ -102,6 +102,37 @@ try {
     assert.equal(r.body.events.length, 0, `TTL 后应清空，实际 ${r.body.events.length}`);
   });
 
+  await t('撤销可用 client_token（客户端不存 send_token，旧记录也能删）', async () => {
+    const reg2 = await api('/v1/bots', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: '撤销自测', scope: 'personal' }),
+    });
+    assert.equal(reg2.status, 201);
+    const ct = reg2.body.client_token;
+    // 先入队一条，撤销应连未取走的消息一起清掉。
+    assert.equal((await api(`/publish/${reg2.body.send_token}?text=pending`)).status, 200);
+    assert.equal((await api(`/pull/${ct}`)).body.events.length, 1);
+    const del = await api(`/v1/bots/${ct}`, { method: 'DELETE' });
+    assert.equal(del.status, 200, `client_token 撤销应成功：${JSON.stringify(del.body)}`);
+    assert.equal((await api(`/pull/${ct}`)).status, 401, '撤销后 client_token 应失效');
+    assert.equal((await api(`/publish/${reg2.body.send_token}?text=after`)).status, 401, '旧 hook 应失效');
+  });
+
+  await t('长轮询：新消息立即唤醒（不等满 wait）', async () => {
+    const start = Date.now();
+    const pullP = api(`/pull/${client}?wait=15`);
+    await sleep(300);
+    const pub = await api(`/publish/${send}?text=${encodeURIComponent('长轮询唤醒')}`);
+    assert.equal(pub.status, 200);
+    const r = await pullP;
+    const elapsed = Date.now() - start;
+    assert.ok(elapsed < 3000, `新消息应在 <3s 唤醒长轮询，实际 ${elapsed}ms`);
+    assert.ok(r.body.events.some((e) => e.text.includes('长轮询唤醒')), '唤醒后应拿到新消息');
+    const eid = r.body.events.find((e) => e.text.includes('长轮询唤醒')).id;
+    await api(`/ack/${client}/${eid}`);
+  });
+
   await t('队列上限 503（背压，不静默丢）', async () => {
     for (let i = 0; i < 5; i += 1) {
       const r = await api(`/publish/${send}?text=fill${i}`);
@@ -116,6 +147,7 @@ try {
     assert.equal((await api('/pull/wrong-token')).status, 401);
     assert.equal((await api('/publish/wrong-token?text=x')).status, 401);
   });
+
 
   console.log(`\n✓ v7 通知器自测通过：${passed} 条`);
 } catch (e) {

@@ -6,7 +6,7 @@
  *   GET  /publish/<send_token>?text=构建完成&title=CI
  *   POST /publish/<send_token>        body: 纯文本 或 {"text":"…"}
  *   PUT  /publish/<send_token>        同上
- *   GET  /pull/<client_token>?limit=20
+ *   GET  /pull/<client_token>?limit=20&wait=15  （wait = 长轮询，新消息立即返回）
  *   GET  /ack/<client_token>/<event_id>
  *   GET  /healthz                     （保留原健康端点）
  *
@@ -52,6 +52,22 @@ function readJson(file, fallback) {
     return JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch {
     return fallback;
+  }
+}
+
+/**
+ * 长轮询等待者（2026-11-17）：客户端 pull 可带 `?wait=15`，队列空时挂起，
+ * 第三方一发消息就**立即唤醒返回**（近实时），不必等满 60s 轮询间隔。
+ * 不新建连接、不动 TCP 盲中继（Frozen），只是让已有 HTTP 请求多等一会儿。
+ */
+const waiters = new Set();
+
+function wakeWaiters(sendToken) {
+  for (const w of [...waiters]) {
+    if (w.sendToken !== sendToken) continue;
+    waiters.delete(w);
+    clearTimeout(w.timer);
+    w.resolve();
   }
 }
 
@@ -155,13 +171,21 @@ export async function handleNotify(req, res) {
     });
   }
 
-  // DELETE /v1/bots/<send_token> → 撤销（删记录 ⇒ 旧 hook 立即 401）
+  // DELETE /v1/bots/<send_token | client_token> → 撤销（删记录 ⇒ 旧 hook 立即 401）
+  //
+  // 2026-11-17 修「删除机器人失败」：客户端的 BotRecord **不存 send_token**（创建时只回显
+  // 一次，之后没有落库），此前客户端误传 bot_id ⇒ 这里按 bots[bot_id] 查不到、恒 404。
+  // 现在同时接受 client_token —— 它是客户端一直持有的取件凭证，旧机器人记录也能撤销。
   if (req.method === 'DELETE' && parts.length === 3 && parts[0] === 'v1' && parts[1] === 'bots') {
     const token = parts[2];
-    if (!bots[token]) return json(res, 404, { error: 'not_found' });
-    delete bots[token];
+    const key = bots[token]
+      ? token
+      : Object.keys(bots).find((k) => bots[k].client_token === token);
+    if (!key) return json(res, 404, { error: 'not_found' });
+    const sendToken = bots[key].token; // 事件按 send_token 归属（见 publish 入队）
+    delete bots[key];
     // 同时清掉该 bot 未取走的事件（不再可达 ⇒ 留着只是膨胀）。
-    for (const [id, ev] of Object.entries(events)) if (ev.bot === token) delete events[id];
+    for (const [id, ev] of Object.entries(events)) if (ev.bot === sendToken) delete events[id];
     saveBots(); saveEvents();
     return json(res, 200, { ok: true });
   }
@@ -179,17 +203,31 @@ export async function handleNotify(req, res) {
     const id = randomUUID();
     events[id] = { id, bot: bot.token, text: text.slice(0, 8192), title, format, action, ts: Date.now() };
     saveEvents();
+    wakeWaiters(bot.token); // 挂起的 pull 立即拿到这条 ⇒ 远小于轮询间隔
     return json(res, 200, { ok: true, id });
   }
 
-  // GET /pull/<client_token> → 取件（不删，等 ack）
+  // GET /pull/<client_token>?wait=<秒> → 取件（不删，等 ack）
+  // `wait` = 长轮询：队列空时挂起，新消息入队立即返回（上限 15s，须小于客户端 HTTP 超时）。
   if (req.method === 'GET' && parts[0] === 'pull' && parts.length === 2) {
     const bot = Object.values(bots).find((b) => b.client_token === parts[1]);
     if (!bot) return json(res, 401, { error: 'bad_token' });
     sweepNotify();
     const limit = Math.min(MAX_PULL, Number(url.searchParams.get('limit')) || MAX_PULL);
-    const list = Object.values(events).filter((e) => e.bot === bot.token).slice(0, limit);
-    return json(res, 200, { events: list });
+    const collect = () => Object.values(events).filter((e) => e.bot === bot.token).slice(0, limit);
+    const waitSec = Math.min(15, Math.max(0, Number(url.searchParams.get('wait')) || 0));
+    if (waitSec > 0 && collect().length === 0) {
+      await new Promise((resolve) => {
+        const w = { sendToken: bot.token, resolve, timer: null };
+        w.timer = setTimeout(() => { waiters.delete(w); resolve(); }, waitSec * 1000);
+        waiters.add(w);
+      });
+      // 等待期间机器人可能被撤销 ⇒ 重新鉴权，别拿旧快照回包。
+      if (!Object.values(bots).find((b) => b.client_token === parts[1])) {
+        return json(res, 401, { error: 'bad_token' });
+      }
+    }
+    return json(res, 200, { events: collect() });
   }
 
   // GET /ack/<client_token>/<event_id> → 确认后删除

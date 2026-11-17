@@ -45,6 +45,15 @@ curl "http://host:59994/pull/<client_token>?limit=20"
 curl "http://host:59994/ack/<client_token>/<event_id>"   # 确认后服务端删除
 ```
 
+**长轮询（快速送达，2026-11-17）**：取件可带 `?wait=15`——队列空时服务端把请求挂起，
+新消息一到**立即唤醒返回**（最多挂 15 秒），不用等下一个轮询周期。
+Gosslan 客户端后台取件就带这个参数，所以外部发一条 curl 后通常是**秒级**收到；
+手动点「立即取件」不带 wait，仍是即时返回。
+
+```bash
+curl "http://host:59994/pull/<client_token>?wait=15"
+```
+
 ## 机器人管理
 
 ```bash
@@ -56,12 +65,14 @@ curl -X POST "http://host:59994/v1/bots" \
 
 # 撤销（hook 立即失效，未取走的消息一起清掉）
 curl -X DELETE "http://host:59994/v1/bots/<send_token>"
+# 也接受 client_token —— 客户端不存 send_token，删除机器人时用它在服务端撤销
 ```
 
 ## 可靠性与边界（诚实）
 
 - **离线可达**：未取走的通知存 `webhook-data/notify-queue.json`，默认保留 **7 天**
-  （`NOTIFY_TTL_MS`）。人不在线没关系，上线打开应用自动轮询取到。
+  （`NOTIFY_TTL_MS`）。人不在线没关系，上线打开应用自动轮询取到；
+  客户端用长轮询（`wait=15`），在线时新通知**秒级**送达（不是等 60 秒轮询）。
 - **不膨胀**：全服上限 `NOTIFY_MAX_EVENTS`（默认 10000），满了返回 503（不静默丢）；
   过期事件每 60 秒物理删除。
 - **群机器人**：通知以**真群消息**发进群（带 `【机器人名】` 前缀），
