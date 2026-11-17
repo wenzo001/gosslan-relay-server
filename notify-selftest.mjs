@@ -96,6 +96,51 @@ try {
     assert.ok(!after.some((e) => e.id === id), 'ack 后不该再返回');
   });
 
+  await t('中文不丢：GET(percent-encoded) / POST body / PUT markdown 三种都原样入队', async () => {
+    // 前置用例可能已占队列（NOTIFY_MAX_EVENTS=5）；先取空并 ack，避免撞上限。
+    const pre = await api(`/pull/${client}`);
+    for (const e of pre.body.events) await api(`/ack/${client}/${e.id}`);
+    const zh = '构建完成：中文标题 ✅';
+    const md = '**加粗** 与 `code`\n- 列表项';
+    const g = await api(`/publish/${send}?text=${encodeURIComponent(zh)}&title=${encodeURIComponent('中文标题')}`);
+    assert.equal(g.status, 200, JSON.stringify(g.body));
+    const p1 = await api(`/publish/${send}`, {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain; charset=utf-8' },
+      body: zh,
+    });
+    assert.equal(p1.status, 200, JSON.stringify(p1.body));
+    const p2 = await api(`/publish/${send}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ text: md, title: '富文本', format: 'markdown' }),
+    });
+    assert.equal(p2.status, 200, JSON.stringify(p2.body));
+
+    const list = await api(`/pull/${client}`);
+    const texts = list.body.events.map((e) => e.text);
+    assert.ok(texts.includes(zh), `GET/POST 的中文丢了：${JSON.stringify(texts)}`);
+    assert.ok(texts.includes(md), `markdown 正文丢了：${JSON.stringify(texts)}`);
+    const mdEvent = list.body.events.find((e) => e.text === md);
+    assert.equal(mdEvent.format, 'markdown', 'format 没有落库 ⇒ 前端无法按富文本渲染');
+    for (const e of list.body.events) await api(`/ack/${client}/${e.id}`);
+  });
+
+  await t('URL 里放原始中文 ⇒ 400 + 可照做的提示（不是静默失败）', async () => {
+    const net = await import('node:net');
+    const raw = await new Promise((resolve) => {
+      const sock = net.connect(PORT, '127.0.0.1', () => {
+        sock.write(`GET /publish/${send}?text=中文未编码 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n`);
+      });
+      let buf = '';
+      sock.on('data', (d) => { buf += d; });
+      sock.on('error', () => {});
+      sock.on('close', () => resolve(buf));
+    });
+    assert.match(raw, /400 Bad Request/, '原始中文 URL 应返回 400');
+    assert.match(raw, /data-urlencode/, '400 响应应给出可照做的写法提示');
+  });
+
   await t('TTL 到期后事件被清理（不膨胀）', async () => {
     await sleep(2200);
     const r = await api(`/pull/${client}`);

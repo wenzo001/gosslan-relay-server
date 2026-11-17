@@ -414,6 +414,19 @@ if (HEALTHZ_PORT > 0) {
       if (!res.headersSent) res.writeHead(500).end();
     });
   });
+  // 用户 2026-11-17：curl 里直接写中文（未 percent-encode）会被 Node 的 HTTP parser
+  // 在请求行阶段拒绝（400 且默认无响应体），用户只看到"没反应"。给出可照做的提示。
+  healthServer.on('clientError', (err, socket) => {
+    if (!socket.writable) { socket.destroy(); return; }
+    const body = JSON.stringify({
+      error: 'bad_request',
+      hint: 'URL 里不能直接放中文等非 ASCII 字符。请改用 -G --data-urlencode "text=中文"，或 POST/PUT 把正文放 body：-X POST -d "中文"',
+    });
+    socket.end(
+      `HTTP/1.1 400 Bad Request\r\nContent-Type: application/json; charset=utf-8\r\n` +
+      `Content-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`,
+    );
+  });
   startNotifySweeper();
   function serveHealth(req, res) {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
