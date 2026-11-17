@@ -98,15 +98,24 @@ async function readText(req, url) {
     try {
       const o = JSON.parse(raw);
       if (o && typeof o.text === 'string') {
-        return { text: o.text, title: typeof o.title === 'string' ? o.title : '', format: o.format === 'markdown' ? 'markdown' : 'text' };
+        return {
+          text: o.text,
+          title: typeof o.title === 'string' ? o.title : '',
+          format: o.format === 'markdown' ? 'markdown' : 'text',
+          // 群机器人管理指令（2026-11-17）：服务端只**透传**，白名单校验在客户端。
+          // 限制为纯 JSON 对象 + 小尺寸，避免外部塞超大树占内存。
+          action: o.action && typeof o.action === 'object' && !Array.isArray(o.action)
+            && JSON.stringify(o.action).length <= 2048 ? o.action : null,
+        };
       }
     } catch { /* 纯文本 body */ }
-    return { text: raw, title: url.searchParams.get('title') ?? '', format: url.searchParams.get('format') === 'markdown' ? 'markdown' : 'text' };
+    return { text: raw, title: url.searchParams.get('title') ?? '', format: url.searchParams.get('format') === 'markdown' ? 'markdown' : 'text', action: null };
   }
   return {
     text: url.searchParams.get('text') ?? '',
     title: url.searchParams.get('title') ?? '',
     format: url.searchParams.get('format') === 'markdown' ? 'markdown' : 'text',
+    action: null,
   };
 }
 
@@ -161,14 +170,14 @@ export async function handleNotify(req, res) {
   if (['GET', 'POST', 'PUT'].includes(req.method) && parts[0] === 'publish' && parts.length === 2) {
     const bot = bots[parts[1]];
     if (!bot) return json(res, 401, { error: 'bad_token' });
-    const { text, title, format } = await readText(req, url);
+    const { text, title, format, action } = await readText(req, url);
     if (!text) return json(res, 400, { error: 'text_required' });
     sweepNotify();
     if (Object.keys(events).length >= MAX_EVENTS) {
       return json(res, 503, { error: 'queue_full' });
     }
     const id = randomUUID();
-    events[id] = { id, bot: bot.token, text: text.slice(0, 8192), title, format, ts: Date.now() };
+    events[id] = { id, bot: bot.token, text: text.slice(0, 8192), title, format, action, ts: Date.now() };
     saveEvents();
     return json(res, 200, { ok: true, id });
   }
