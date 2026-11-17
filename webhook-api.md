@@ -173,7 +173,18 @@ curl -H "Authorization: Bearer $BOT_SECRET" \
 | 图片张数 / 单张 | 4 张 / 5 MiB | `WEBHOOK_MAX_IMAGES` / `WEBHOOK_MAX_IMAGE_BYTES` |
 | 请求体上限 | 24 MiB | `WEBHOOK_MAX_REQUEST_BYTES` |
 | 每 bot 队列深度 | 500 | `WEBHOOK_QUEUE_DEPTH_PER_BOT` |
-| 事件保留 | 7 天 | `WEBHOOK_QUEUE_TTL_MS` |
+| **未送达**事件保留（可达性窗口） | 7 天 | `WEBHOOK_QUEUE_TTL_MS` |
+| **终态**事件保留（送达/过期后） | 1 小时 | `WEBHOOK_DONE_RETENTION_MS` |
+| 全服事件硬上限 | 10000 | `WEBHOOK_MAX_EVENTS_TOTAL` |
+| 幂等索引 / 限流桶淘汰 | 7 天 | `WEBHOOK_INDEX_TTL_MS` |
+
+**可达性与内存（审计 2026-11-17）**：
+- 用户**临时离线**不影响消息：事件在队列里最多留 7 天（TTL），租约到期自动重投，
+  用户上线取件即可收到；超过 TTL 才丢弃 —— 这是「最终期限」。
+- **送达之后**只留 1 小时供查状态，然后**物理删除**（连附件一起清）⇒ 内存和磁盘都不膨胀。
+- 全服事件数硬上限 10000、每 bot 队列深度 500：到了上限**明确回 503（背压）**，
+  不会静默接收后丢失，也不会无限吃内存。
+- 清理由每 60 秒的定时任务驱动（不只靠客户端 pull），所以没有客户端也能回收。
 | 租约 | 60s | `WEBHOOK_LEASE_MS` |
 | 每 bot 速率 | 60/分钟 | `WEBHOOK_RATE_PER_MIN` |
 
