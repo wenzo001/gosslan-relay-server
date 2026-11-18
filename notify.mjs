@@ -65,8 +65,8 @@ const waiters = new Set();
 function wakeWaiters(sendToken) {
   for (const w of [...waiters]) {
     if (w.sendToken !== sendToken) continue;
-    waiters.delete(w);
-    clearTimeout(w.timer);
+    // 统一走 waiter 自带的清理：摘 Set / 清 timer / 摘 res 的 close 监听。
+    w.cleanup();
     w.resolve();
   }
 }
@@ -186,6 +186,8 @@ export async function handleNotify(req, res) {
     delete bots[key];
     // 同时清掉该 bot 未取走的事件（不再可达 ⇒ 留着只是膨胀）。
     for (const [id, ev] of Object.entries(events)) if (ev.bot === sendToken) delete events[id];
+    // 撤销即唤醒：挂在这个 hook 上的长轮询立刻重新鉴权拿 401，不空等满 15s。
+    wakeWaiters(sendToken);
     saveBots(); saveEvents();
     return json(res, 200, { ok: true });
   }
@@ -202,7 +204,14 @@ export async function handleNotify(req, res) {
     }
     const id = randomUUID();
     events[id] = { id, bot: bot.token, text: text.slice(0, 8192), title, format, action, ts: Date.now() };
-    saveEvents();
+    // 先落盘再对外报成功：写盘失败要回滚内存，否则「内存有、盘上没有」= 进程重启即丢，
+    // 且等待者被叫醒后 pull 到的是一条重启就没的事件（半持久化）。失败不发 200、不唤醒。
+    try {
+      saveEvents();
+    } catch (e) {
+      delete events[id];
+      return json(res, 503, { error: 'persist_failed' });
+    }
     wakeWaiters(bot.token); // 挂起的 pull 立即拿到这条 ⇒ 远小于轮询间隔
     return json(res, 200, { ok: true, id });
   }
@@ -220,15 +229,34 @@ export async function handleNotify(req, res) {
     const bot = Object.values(bots).find((b) => b.client_token === parts[1]);
     if (!bot) return json(res, 401, { error: 'bad_token' });
     sweepNotify();
-    const limit = Math.min(MAX_PULL, Number(url.searchParams.get('limit')) || MAX_PULL);
+    // 显式的正整数校验：`|| MAX_PULL` 会让 limit=0 变成 50、limit=-5 变成 slice(0,-5)（取「除末 5 条外」）。
+    // 非法/缺省一律回落默认上限；合法值再夹到 MAX_PULL。
+    const rawLimit = Number(url.searchParams.get('limit'));
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0
+      ? Math.min(MAX_PULL, Math.floor(rawLimit))
+      : MAX_PULL;
     const collect = () => Object.values(events).filter((e) => e.bot === bot.token).slice(0, limit);
     const waitSec = Math.min(15, Math.max(0, Number(url.searchParams.get('wait')) || 0));
     if (waitSec > 0 && collect().length === 0) {
+      const w = { sendToken: bot.token, resolve: null, timer: null, closed: false, aborted: false };
       await new Promise((resolve) => {
-        const w = { sendToken: bot.token, resolve, timer: null };
-        w.timer = setTimeout(() => { waiters.delete(w); resolve(); }, waitSec * 1000);
+        w.resolve = resolve;
+        // 统一清理：从等待集合摘除 + 停表 + 摘掉 res 监听，避免断连后 waiter 滞留到超时。
+        w.cleanup = () => {
+          if (w.closed) return;
+          w.closed = true;
+          waiters.delete(w);
+          clearTimeout(w.timer);
+          res.off('close', onClose);
+        };
+        const onClose = () => { w.aborted = true; w.cleanup(); resolve(); }; // 客户端断开 ⇒ 立即结束等待，别空挂满 15s
+        w.timer = setTimeout(() => { w.cleanup(); resolve(); }, waitSec * 1000);
+        res.once('close', onClose);
         waiters.add(w);
       });
+      // 客户端断开 ⇒ 不再写响应（close 事件里已置 aborted）：此时 Socket 已走，再 writeHead 会抛
+      // 「Cannot write headers after they are sent」。直接认领掉这条请求即可。
+      if (w.aborted || res.destroyed || res.writableEnded) return true;
       // 等待期间机器人可能被撤销 ⇒ 重新鉴权，别拿旧快照回包。
       if (!Object.values(bots).find((b) => b.client_token === parts[1])) {
         return json(res, 401, { error: 'bad_token' });

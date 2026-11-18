@@ -193,6 +193,55 @@ try {
     assert.equal((await api('/publish/wrong-token?text=x')).status, 401);
   });
 
+  await t('limit 边界：0 / 负数 / 非数字都回落默认，不再取到奇怪子集', async () => {
+    // 先清空（前面队列上限用例填满了）。
+    const pre = await api(`/pull/${client}`);
+    for (const e of pre.body.events) await api(`/ack/${client}/${e.id}`);
+    // 连发 3 条，默认上限 50 ⇒ 三条都该回来。
+    for (let i = 0; i < 3; i += 1) assert.equal((await api(`/publish/${send}?text=lim${i}`)).status, 200);
+    for (const q of ['0', '-5', 'abc']) {
+      const r = await api(`/pull/${client}?limit=${q}`);
+      assert.equal(r.status, 200);
+      assert.equal(r.body.events.length, 3, `limit=${q} 应回落默认取 3 条，实际 ${r.body.events.length}`);
+    }
+    // 正常正整数仍生效：limit=1 只取 1 条。
+    const one = await api(`/pull/${client}?limit=1`);
+    assert.equal(one.body.events.length, 1, 'limit=1 应只取 1 条');
+    for (const e of (await api(`/pull/${client}`)).body.events) await api(`/ack/${client}/${e.id}`);
+  });
+
+  await t('撤销机器人会立即唤醒挂在它上面的长轮询（不等满 15s）', async () => {
+    const reg3 = await api('/v1/bots', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: '唤醒撤销自测', scope: 'personal' }),
+    });
+    const ct = reg3.body.client_token;
+    const start = Date.now();
+    const pullP = api(`/pull/${ct}?wait=15`);
+    await sleep(300);
+    assert.equal((await api(`/v1/bots/${ct}`, { method: 'DELETE' })).status, 200);
+    const r = await pullP;
+    const elapsed = Date.now() - start;
+    assert.equal(r.status, 401, '撤销后挂起的 pull 应重新鉴权拿 401');
+    assert.ok(elapsed < 3000, `撤销应立即唤醒长轮询，实际等了 ${elapsed}ms`);
+  });
+
+  await t('长轮询客户端中途断开：不留残留 waiter，也不污染后续收发', async () => {
+    const net = await import('node:net');
+    const sock = net.connect(PORT, '127.0.0.1', () => {
+      sock.write(`GET /pull/${client}?wait=15 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n`);
+    });
+    await sleep(200);
+    sock.destroy(); // 客户端在 15s 窗口内断开
+    await sleep(400);
+    // 断开后发消息应正常入队、取件能拿到（证明 waiter 被摘、状态没被搞坏）。
+    const r = await api(`/publish/${send}?text=${encodeURIComponent('断连后')}`);
+    assert.equal(r.status, 200);
+    const pulled = await api(`/pull/${client}`);
+    assert.ok(pulled.body.events.some((e) => e.text.includes('断连后')), '断连后消息应仍能取到');
+    for (const e of pulled.body.events) await api(`/ack/${client}/${e.id}`);
+  });
 
   console.log(`\n✓ v7 通知器自测通过：${passed} 条`);
 } catch (e) {
