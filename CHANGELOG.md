@@ -4,6 +4,20 @@
 `feat` → minor，`fix`（含安全加固）→ patch，`docs`/`test` → patch。
 一 issue 一 commit 一版本。
 
+## [Unreleased]
+
+### Removed
+
+- **彻底清除 v6，仓库现只支持 v7**：删除 `legacy/` 整个目录（v6 `webhook.mjs`、它的两套自测
+  共 19 条断言、`webhook-api.md`、`legacy/README.md`）。这些在上一个版本只是从根目录
+  移到 `legacy/` 留档；本次按"只要现役 v7"的要求直接删除 —— 留着它们仍可能被误跑、
+  误当成证据。所有指向 `legacy/` 的文档链接与"归档"措辞同步改成"已删除、不兼容"，
+  `ci.yml` 与 `gosslan-relay.env.example` 里的相关注释同步更新。
+- **保留的防呆提示**：README 与 env.example 里"旧 v6 已删除、不要再照抄 / v6 机器人需重建"
+  这几句是 v7 迁移指引，不是 v6 支持，仍在。`WEBHOOK_DATA_DIR` / `webhook-data/` 是
+  **v7 `notify.mjs` 的队列落盘目录**，与 v6 无关，未动。TCP 盲中继（59993）与
+  protocol fixture 一字未动。
+
 ## [1.3.1] - 2026-11-18
 
 ### Added

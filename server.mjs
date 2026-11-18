@@ -28,7 +28,7 @@
 
 import net from 'node:net';
 import http from 'node:http';
-// v7 极简通知器：复用本进程的 HTTP 端点（默认 59994），不再单独起 webhook.mjs。
+// v7 极简通知器：复用本进程的 HTTP 端点（默认 59994），单进程一个 PM2 条目。
 // TCP 盲中继逻辑一字未动 —— 好友/群通信依赖它。
 import { handleNotify, notifyStats, startNotifySweeper } from './notify.mjs';
 import { readFileSync } from 'node:fs';

@@ -80,9 +80,9 @@ curl -X DELETE "http://host:59994/v1/bots/<send_token>"
 - **简化代价（用户明确接受）**：token 在 URL（会进访问日志），无幂等键、无租约重投、
   token 明文存配置 ⇒ **安全性低，适合可信网络/内网**。公网请放 HTTPS 反代并给
   `Authorization`/查询串脱敏，或限制来源 IP。
-- 旧 v6 协议（`/v1/hooks/...` + header + HMAC）**已删除，不兼容**；v6 机器人需重建。
-- 旧的独立进程 `webhook.mjs` / `WEBHOOK_PORT=59995` **已下线**：源码、接口文档与它的两套自测
-  一起归档在 [`legacy/`](legacy/README.md)（留档，不部署、不算现役证据）。
+- 旧 v6 协议（`/v1/hooks/...` + header + HMAC）**已彻底删除，不兼容**；v6 机器人需重建。
+- 旧的独立进程 `webhook.mjs` / `WEBHOOK_PORT=59995` 及其接口文档、两套自测均已从仓库移除。
+  本仓现只支持 v7 这一套通知协议。
 
 ## 环境变量
 
@@ -103,5 +103,5 @@ node notify-selftest.mjs          # 现读脚本末尾「自测通过：N 条」
 node notify-persist-selftest.mjs  # 写盘失败必须回滚（503 persist_failed），且不许假装成功
 ```
 
-两套都在 `.github/workflows/ci.yml` 的 `test` job 里跑；`legacy/` 里的 webhook 那两套**不在**，
-它们测的是已下线模块（见 [`legacy/README.md`](legacy/README.md)）。
+两套都在 `.github/workflows/ci.yml` 的 `test` job 里跑。旧 v6 webhook 的自测已随源码一并删除，
+不再有任何非现役的测试档混在仓库里。
