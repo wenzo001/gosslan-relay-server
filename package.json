@@ -11,7 +11,7 @@
     "gosslan-relay": "./server.mjs"
   },
   "scripts": {
-    "start": "node server.mjs",
+    "start": "TOKEN=$(openssl rand -hex 16) node server.mjs",
     "selftest": "node selftest.mjs",
     "conformance": "node protocol_conformance.mjs",
     "bench": "node bench.mjs",
