@@ -31,9 +31,11 @@ LAN > 跨网段/中继 > 蓝牙），填了它也不会让正常聊天绕道公�
 > ⇒ 公网部署请放在 HTTPS 反代后面或限制来源 IP；不要把本服务当作「读不到内容的中继」宣传。
 >
 > - **完整部署/使用/接入说明：[`README-v7-notify.md`](README-v7-notify.md)**（唯一权威入口）
-> - 自测：`node notify-selftest.mjs`（8 条）
-> - 旧 v6（`webhook.mjs` / 59995 / header + HMAC + 幂等键）**已删除、不兼容**；
->   `webhook.mjs` 与 [`webhook-api.md`](webhook-api.md) 仅作历史留存，不要再照着部署。
+> - 自测：`npm run selftest:notify`（v7 通知服务，**条数由脚本末尾自己打印**，不在这里手抄）
+>   ＋ `npm run selftest:notify-persist`（写盘失败必须回滚且不假装成功）；两套都在 CI 的 `test` job 里。
+> - 旧 v6（独立进程 `webhook.mjs` / 59995 / header + HMAC + 幂等键）**已下线、不兼容**：
+>   源码、接口文档与它那两套自测都已归档到 [`legacy/`](legacy/README.md)，
+>   不再部署，也**不算现役证据**（跑它们绿了不能说明通知服务没问题）。
 > - **TCP 盲中继（`server.mjs` 的 59993 部分）没有改动**：协议 fixture 与行为一字未动。
 
 ## 目录

@@ -1,6 +1,6 @@
 {
   "name": "gosslan-relay-server",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "private": true,
   "description": "Gosslan 公网中转（哑管道）：只把两条连接拼成字节管道，不解析、不存储、读不到内容。零依赖。",
   "type": "module",
@@ -13,9 +13,9 @@
   "scripts": {
     "start": "TOKEN=$(openssl rand -hex 16) node server.mjs",
     "selftest": "node selftest.mjs",
+    "selftest:notify": "node notify-selftest.mjs",
+    "selftest:notify-persist": "node notify-persist-selftest.mjs",
     "conformance": "node protocol_conformance.mjs",
-    "bench": "node bench.mjs",
-    "start:webhook": "node webhook.mjs",
-    "selftest:webhook": "node webhook-selftest.mjs"
+    "bench": "node bench.mjs"
   }
 }

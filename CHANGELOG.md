@@ -4,6 +4,33 @@
 `feat` → minor，`fix`（含安全加固）→ patch，`docs`/`test` → patch。
 一 issue 一 commit 一版本。
 
+## [1.3.1] - 2026-11-18
+
+### Added
+
+- **CI 接上现役通知服务的两套自测**：`notify-selftest.mjs`（16 条）与
+  `notify-persist-selftest.mjs`（3 条）。在此之前它们**没有任何自动化入口** ——
+  `ci.yml` 只跑 `selftest.mjs`、`protocol_conformance.mjs` 与 fixture 比对，
+  于是 v7 通知服务的判据全靠人记得手跑。job 名改为
+  `selftest + notify + protocol conformance + fixture`，工作流头部写明
+  「这两条 notify 自测必须留在 CI 里」，以及「webhook.mjs 的两套自测故意不在这里」。
+
+### Changed
+
+- **归档已下线的 v6 `webhook.mjs`**：连它的两套自测（19 条断言）与 `webhook-api.md`
+  一并移入 `legacy/`（`git mv`，历史保留）。摘掉 `start:webhook` 与
+  `selftest:webhook` 两个 npm 入口 —— 留着它们等于把「跑一个不部署的模块」当成证据。
+  `legacy/README.md` 写清了 v6 与现役 v7 的差别（独立进程 59995 + header/HMAC +
+  幂等键 + 租约重投 vs 复用 `server.mjs` 的 59994 + token 在 URL + 无幂等无租约），
+  以及那句最容易被误读的话：**跑 legacy 那 19 条绿了不能证明现役通知服务没问题**。
+- **README 数字漂移**：`notify-selftest.mjs` 原写「8 条」，实际 16 条；改成不再手抄
+  条数（复跑命令在文档里），避免下次又被改一处漏一处。
+
+### Fixed
+
+- `.gitignore` 补 `webhook-data/`：`notify.mjs` 在 cwd 下默认建这个队列落盘目录，
+  本地跑一次就出现，里面是用户的待取通知 —— 不该有机会被 `git add`。
+
 ## [1.3.0] - 2026-11-03
 
 ### Added
