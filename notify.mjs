@@ -103,6 +103,10 @@ export function startNotifySweeper() {
 function json(res, code, body) {
   const text = JSON.stringify(body);
   res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' }).end(text);
+  // 返回「已处理」：handleNotify 的每个分支都 `return json(...)`，调用方据此判断是否还要走
+  // healthz/404。此前返回 undefined ⇒ 所有通知请求处理完又 serveHealth 二次写响应头，
+  // 日志刷「Cannot write headers after they are sent」（不影响响应，但污染日志、掩盖真错）。
+  return true;
 }
 
 /** 从 URL / body 里取通知正文。 */

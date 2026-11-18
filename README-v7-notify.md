@@ -98,5 +98,5 @@ curl -X DELETE "http://host:59994/v1/bots/<send_token>"
 ## 自测
 
 ```bash
-node notify-selftest.mjs    # 8 条：三方法/离线留存/ack/TTL/上限/错误 token
+node notify-selftest.mjs    # 现读脚本末尾「自测通过：N 条」；覆盖三方法/离线留存/ack/TTL/上限/中文/长轮询/limit/断连/撤销唤醒/无二次写
 ```

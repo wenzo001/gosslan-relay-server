@@ -243,6 +243,12 @@ try {
     for (const e of pulled.body.events) await api(`/ack/${client}/${e.id}`);
   });
 
+  await t('通知请求处理完不二次写响应（日志无 Cannot write headers）', async () => {
+    await sleep(300); // 让服务端异步的 .then(serveHealth) 有机会暴露
+    assert.ok(!stderr.includes('Cannot write headers'),
+      `handleNotify 返回 undefined 会触发 serveHealth 二次写：\n${stderr}`);
+  });
+
   console.log(`\n✓ v7 通知器自测通过：${passed} 条`);
 } catch (e) {
   console.error('\n✗ v7 通知器自测失败：', e?.stack ?? e);
